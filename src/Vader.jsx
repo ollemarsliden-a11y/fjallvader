@@ -268,9 +268,10 @@ async function fetchEnsemble(lat, lon) {
   return byDay;
 }
 
-// Normaler: samma datum senaste 10 åren (ERA5-återanalys), cachas 30 dagar
+// Normaler: samma datum senaste 10 åren (ERA5-återanalys), cachas 30 dagar.
+// Sparar både snittet och varje enskilt år så man kan fälla ut år-för-år.
 async function fetchNormals(lat, lon) {
-  const key = `fjallvader_normals_${lat.toFixed(1)}_${lon.toFixed(1)}`;
+  const key = `fjallvader_normals_v2_${lat.toFixed(1)}_${lon.toFixed(1)}`;
   try {
     const cached = JSON.parse(localStorage.getItem(key) || "null");
     if (cached && Date.now() - cached.t < 30 * 86400000) return cached.data;
@@ -283,19 +284,24 @@ async function fetchNormals(lat, lon) {
   const r = await fetch(url);
   if (!r.ok) throw new Error("Arkiv-API svarade inte");
   const j = await r.json();
-  const acc = {}; // "MM-DD" -> { hi: [], lo: [] }
+  const acc = {}; // "MM-DD" -> { hi: [], lo: [], years: [{year, tmax, tmin}] }
   (j.daily?.time || []).forEach((t, i) => {
     const k = mmdd(t);
     const hi = j.daily.temperature_2m_max[i];
     const lo = j.daily.temperature_2m_min[i];
     if (hi == null) return;
-    (acc[k] ||= { hi: [], lo: [] });
+    (acc[k] ||= { hi: [], lo: [], years: [] });
     acc[k].hi.push(hi);
     if (lo != null) acc[k].lo.push(lo);
+    acc[k].years.push({ year: Number(t.slice(0, 4)), tmax: hi, tmin: lo });
   });
   const data = {};
   for (const [k, v] of Object.entries(acc)) {
-    data[k] = { tmax: mean(v.hi), tmin: mean(v.lo) };
+    data[k] = {
+      tmax: mean(v.hi),
+      tmin: mean(v.lo),
+      years: v.years.sort((a, b) => b.year - a.year), // nyast först
+    };
   }
   try { localStorage.setItem(key, JSON.stringify({ t: Date.now(), data })); } catch { /* fullt */ }
   return data;
@@ -550,6 +556,7 @@ export default function VaderApp() {
   const [kp, setKp] = useState(null);
   const [optimist, setOptimist] = useState(false);
   const [openDay, setOpenDay] = useState(null);
+  const [showYears, setShowYears] = useState(false);
   const debounce = useRef(null);
   const reduceMotion = useMemo(
     () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
@@ -790,9 +797,52 @@ export default function VaderApp() {
                         Vind {fmt0(cur.wind_speed_10m / 3.6)} m/s · molntäcke {fmt0(cur.cloud_cover)} %
                       </div>
                       {todayDelta != null && Math.abs(todayDelta) >= 0.5 && (
-                        <div style={{ fontSize: 13, marginTop: 6, fontWeight: 500, color: todayDelta > 0 ? "#B4552D" : "#2D6FB4" }}>
+                        <button
+                          onClick={() => setShowYears(!showYears)}
+                          aria-expanded={showYears}
+                          style={{
+                            display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6,
+                            padding: 0, border: "none", background: "transparent", cursor: "pointer",
+                            fontSize: 13, fontWeight: 500, textAlign: "left",
+                            color: todayDelta > 0 ? "#B4552D" : "#2D6FB4", ...font,
+                          }}>
                           {Math.abs(fmt1(todayDelta))}° {todayDelta > 0 ? "varmare" : "kallare"} än normalt för den {dayDate(days[0].date)}
                           <span style={{ color: muted, fontWeight: 400 }}> (snitt senaste 10 åren)</span>
+                          <span style={{ color: muted, fontSize: 11, transform: showYears ? "rotate(180deg)" : "none", transition: "transform .2s" }}>▾</span>
+                        </button>
+                      )}
+                      {showYears && todayNormal?.years?.length > 0 && (
+                        <div style={{ marginTop: 10, borderTop: `1px solid ${line}`, paddingTop: 10 }}>
+                          <div style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                            Den {dayDate(days[0].date)}, år för år
+                          </div>
+                          {(() => {
+                            const yrs = todayNormal.years;
+                            const highs = yrs.map((y) => y.tmax);
+                            const warmest = Math.max(...highs), coldest = Math.min(...highs);
+                            return yrs.map((y) => {
+                              const isWarm = y.tmax === warmest, isCold = y.tmax === coldest;
+                              const pct = clamp(((y.tmax - coldest) / (warmest - coldest || 1)) * 100, 0, 100);
+                              return (
+                                <div key={y.year} style={{ display: "flex", alignItems: "center", gap: 10, padding: "3px 0", fontSize: 13 }}>
+                                  <span style={{ width: 34, color: muted, fontVariantNumeric: "tabular-nums" }}>{y.year}</span>
+                                  <div style={{ flex: 1, height: 6, background: line, borderRadius: 3, overflow: "hidden" }}>
+                                    <div style={{
+                                      height: "100%", width: `${pct}%`, borderRadius: 3,
+                                      background: isWarm ? "#B4552D" : isCold ? "#2D6FB4" : "#8FA3B8",
+                                    }} />
+                                  </div>
+                                  <span style={{ ...display, width: 44, textAlign: "right", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                                    {fmt1(y.tmax)}°
+                                  </span>
+                                  <span style={{ width: 16, fontSize: 12 }}>{isWarm ? "🔥" : isCold ? "❄️" : ""}</span>
+                                </div>
+                              );
+                            });
+                          })()}
+                          <div style={{ fontSize: 11, color: muted, marginTop: 8 }}>
+                            Dagens maxtemp: {fmt1(days[0].consensus.tmax)}°. Staplarna visar dagstemperaturen samma datum varje år.
+                          </div>
                         </div>
                       )}
                     </>
