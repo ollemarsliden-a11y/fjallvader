@@ -241,7 +241,7 @@ async function fetchMultiModel(lat, lon) {
 async function fetchStandard(lat, lon) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
     `&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,cloud_cover,is_day` +
-    `&daily=uv_index_max,sunrise,sunset&hourly=cloud_cover,cape,weather_code,snow_depth&timezone=auto&past_days=1&forecast_days=7`;
+    `&daily=uv_index_max,sunrise,sunset&hourly=cloud_cover,cape,weather_code,snow_depth,temperature_2m,precipitation,precipitation_probability,wind_speed_10m&timezone=auto&past_days=1&forecast_days=7`;
   const r = await fetch(url);
   if (!r.ok) throw new Error("Open-Meteo svarade inte");
   return r.json();
@@ -777,6 +777,88 @@ function BandChart({ days, ink, muted, optimist }) {
   );
 }
 
+// ---------- timremsa: timme för timme med temperaturkurva ----------
+
+function HourlyStrip({ std, date, resolution, ink, muted, line, display }) {
+  const rows = useMemo(() => {
+    const h = std?.hourly;
+    if (!h?.temperature_2m) return [];
+    const now = new Date();
+    const out = [];
+    h.time.forEach((t, i) => {
+      if (dateKey(t) !== date) return;
+      const d = new Date(t);
+      const isToday = dateKey(now.toISOString()) === date || d.toLocaleDateString("sv-SE") === now.toLocaleDateString("sv-SE");
+      if (isToday && d < now && d.getHours() < now.getHours()) return; // passerade timmar idag
+      out.push({ i, hour: d.getHours(), t: h.temperature_2m[i] });
+    });
+    if (resolution === 1) return out;
+    // 3-timmarsblock: sampla var tredje timme, summera nederbörd över blocket
+    return out.filter((r) => r.hour % 3 === 0).map((r) => ({ ...r, block: true }));
+  }, [std, date, resolution]);
+
+  const h = std?.hourly;
+  if (!h || rows.length < 2) return null;
+
+  const COL = 48, CURVE_H = 42;
+  const temps = rows.map((r) => r.t).filter((v) => v != null);
+  const tMin = Math.min(...temps), tMax = Math.max(...temps);
+  const y = (v) => 6 + (CURVE_H - 16) * (1 - (v - tMin) / (tMax - tMin || 1));
+  const curvePath = rows.map((r, i) => `${i ? "L" : "M"}${i * COL + COL / 2},${y(r.t)}`).join("");
+
+  const precipOf = (r) => {
+    if (!h.precipitation) return 0;
+    if (resolution === 1) return h.precipitation[r.i] ?? 0;
+    let sum = 0;
+    for (let k = 0; k < 3; k++) sum += h.precipitation[r.i + k] ?? 0;
+    return sum;
+  };
+  const probOf = (r) => h.precipitation_probability?.[r.i] ?? null;
+
+  return (
+    <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", margin: "0 -6px" }}>
+      <div style={{ width: "max-content", padding: "0 6px" }}>
+        <svg width={rows.length * COL} height={CURVE_H} style={{ display: "block" }} aria-hidden="true">
+          <path d={curvePath} fill="none" stroke={ink} strokeWidth="2" strokeLinecap="round" />
+          {rows.map((r, i) => (
+            <circle key={i} cx={i * COL + COL / 2} cy={y(r.t)} r="2.5" fill={ink} />
+          ))}
+        </svg>
+        <div style={{ display: "flex" }}>
+          {rows.map((r, i) => {
+            const prob = probOf(r);
+            const mm = precipOf(r);
+            // regnchans-toning: ljus vid uppehåll, blågrå ton när körningarna spretar mot regn
+            const tint = prob != null ? Math.min(prob / 100, 1) * 0.22 : 0;
+            return (
+              <div key={i} style={{
+                width: COL, textAlign: "center", padding: "5px 2px 7px",
+                background: tint > 0.02 ? `rgba(45,111,180,${tint})` : "transparent",
+                borderRadius: 8,
+              }}>
+                <div style={{ fontSize: 10, color: muted }}>
+                  {String(r.hour).padStart(2, "0")}{r.block ? "–" + String((r.hour + 3) % 24).padStart(2, "0") : ""}
+                </div>
+                <div style={{ fontSize: 15, lineHeight: "20px" }}>{wmoIcon(h.weather_code?.[r.i])}</div>
+                <div style={{ ...display, fontSize: 13, fontWeight: 700, color: ink }}>{fmt0(r.t)}°</div>
+                <div style={{ fontSize: 9.5, color: "#2D6FB4", minHeight: 12, fontWeight: prob >= 50 ? 600 : 400 }}>
+                  {prob != null && prob >= 20 ? `${prob} %` : ""}
+                </div>
+                <div style={{ fontSize: 9.5, color: muted, minHeight: 11 }}>
+                  {mm >= 0.1 ? `${fmt1(mm)} mm` : ""}
+                </div>
+                <div style={{ fontSize: 9.5, color: muted }}>
+                  {h.wind_speed_10m?.[r.i] != null ? `${fmt0(h.wind_speed_10m[r.i] / 3.6)} m/s` : ""}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- huvudkomponent ----------
 
 export default function VaderApp() {
@@ -803,6 +885,16 @@ export default function VaderApp() {
   const [favorites, setFavorites] = useState(() => {
     try { return JSON.parse(localStorage.getItem("fjallvader_favs") || "[]"); } catch { return []; }
   });
+  // minimerbara kort: användarens val sparas, säsongsautomatik som grund
+  const CARD_LABELS = { aurora: "Norrsken", moon: "Måne", uv: "UV-index", thunder: "Åskrisk", air: "Luft & pollen", sun: "Soltimmar" };
+  const [cardPrefs, setCardPrefs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("vaderlek_cards") || "{}"); } catch { return {}; }
+  });
+  function setCardPref(k, v) {
+    const next = { ...cardPrefs, [k]: v };
+    setCardPrefs(next);
+    try { localStorage.setItem("vaderlek_cards", JSON.stringify(next)); } catch { /* fullt */ }
+  }
   const debounce = useRef(null);
   const reduceMotion = useMemo(
     () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
@@ -919,6 +1011,16 @@ export default function VaderApp() {
   }, [std]);
 
   const uvToday = std?.daily?.uv_index_max?.[todayIdx];
+
+  // säsongsautomatik: göm norrsken när chansen är försumbar hela perioden
+  const autoHidden = useMemo(() => {
+    const s = new Set();
+    if (auroraNights.length && Math.max(...auroraNights.map((n) => n.chance)) < 5) s.add("aurora");
+    return s;
+  }, [auroraNights]);
+  const isCardVisible = (k) =>
+    cardPrefs[k] === "shown" ? true : cardPrefs[k] === "hidden" ? false : !autoHidden.has(k);
+  const hiddenCards = Object.keys(CARD_LABELS).filter((k) => !isCardVisible(k));
   const risk = useMemo(() => (std ? thunderRisk(std) : null), [std]);
 
   // dagslängd + förändring sedan igår
@@ -974,6 +1076,16 @@ export default function VaderApp() {
     setFavorites(next);
     try { localStorage.setItem("fjallvader_favs", JSON.stringify(next)); } catch { /* fullt */ }
   }
+
+  const MinBtn = ({ k, light }) => (
+    <button onClick={() => setCardPref(k, "hidden")} title="Minimera" aria-label={`Minimera ${CARD_LABELS[k]}`}
+      style={{
+        position: "absolute", top: 12, right: 14, width: 24, height: 24, borderRadius: 8,
+        border: "none", cursor: "pointer", fontSize: 15, lineHeight: "22px", padding: 0, zIndex: 2,
+        background: light ? "rgba(255,255,255,0.14)" : "rgba(22,35,58,0.06)",
+        color: light ? "#C9D6E4" : muted,
+      }}>–</button>
+  );
   function useMyPosition() {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
@@ -1271,16 +1383,29 @@ export default function VaderApp() {
                     </div>
                   )}
 
-                  {/* nivå 3: statusrad */}
-                  {heroDay?.agreement && (
-                    <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: heroDay.agreement.color, display: "inline-block" }} />
-                      <span style={{ color: muted }}>
-                        {heroDay.agreement.label}
-                        {heroDay.ens?.rainProb != null && ` · ${heroDay.ens.rainProb} % regnchans`}
-                      </span>
-                    </div>
-                  )}
+                  {/* nivå 3: statusrad + timgenväg */}
+                  <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 13, flexWrap: "wrap" }}>
+                    {heroDay?.agreement ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: heroDay.agreement.color, display: "inline-block" }} />
+                        <span style={{ color: muted }}>
+                          {heroDay.agreement.label}
+                          {heroDay.ens?.rainProb != null && ` · ${heroDay.ens.rainProb} % regnchans`}
+                        </span>
+                      </div>
+                    ) : <span />}
+                    <button
+                      onClick={() => {
+                        setOpenDay(0);
+                        setTimeout(() => document.getElementById("day-0")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                      }}
+                      style={{
+                        border: "none", background: "transparent", cursor: "pointer", padding: 0,
+                        fontSize: 13, color: "#2D6FB4", fontWeight: 500, ...font,
+                      }}>
+                      Timme för timme ▾
+                    </button>
+                  </div>
                 </>
               ) : null}
             </section>
@@ -1320,7 +1445,7 @@ export default function VaderApp() {
               {nearDays.map((d, i) => {
                 const view = optimist && d.best ? d.best : d.consensus;
                 return (
-                <div key={d.date} style={{ ...card, padding: 0, overflow: "hidden" }}>
+                <div key={d.date} id={`day-${i}`} style={{ ...card, padding: 0, overflow: "hidden", scrollMarginTop: 12 }}>
                   <button
                     onClick={() => setOpenDay(openDay === i ? null : i)}
                     aria-expanded={openDay === i}
@@ -1360,6 +1485,14 @@ export default function VaderApp() {
                   </button>
                   {openDay === i && (
                     <div style={{ borderTop: `1px solid ${line}`, padding: "12px 18px 16px", fontSize: 13 }}>
+                      <div style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                        {i <= 1 ? "Timme för timme" : "Var tredje timme"}
+                      </div>
+                      <HourlyStrip std={std} date={d.date} resolution={i <= 1 ? 1 : 3}
+                        ink={ink} muted={muted} line={line} display={display} />
+                      <div style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.05em", margin: "12px 0 4px" }}>
+                        Källorna
+                      </div>
                       <table style={{ width: "100%", borderCollapse: "collapse" }}>
                         <thead>
                           <tr style={{ color: muted, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -1454,11 +1587,13 @@ export default function VaderApp() {
 
             {/* norrsken + uv */}
             <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+              {isCardVisible("aurora") && (
               <div style={{
                 ...card,
                 background: "linear-gradient(135deg, #101B31 0%, #16233A 55%, #1E3350 100%)",
                 color: "#E8EFF6", border: "none", position: "relative", overflow: "hidden",
               }}>
+                <MinBtn k="aurora" light />
                 <div style={{
                   position: "absolute", inset: 0, opacity: 0.35, pointerEvents: "none",
                   background: "radial-gradient(60% 45% at 70% 0%, #3DDC9766, transparent 70%), radial-gradient(50% 40% at 20% 10%, #7C5CFF55, transparent 70%)",
@@ -1487,8 +1622,11 @@ export default function VaderApp() {
                   Kp-index från NOAA vägt mot molntäcke och latitud. Vid hög chans glöder appens natthimmel — håll utkik.
                 </p>
               </div>
+              )}
 
-              <div style={card}>
+              {isCardVisible("uv") && (
+              <div style={{ ...card, position: "relative" }}>
+                <MinBtn k="uv" />
                 <h2 style={{ ...display, fontSize: 16, fontWeight: 700, margin: "0 0 10px" }}>UV-index idag</h2>
                 {uvToday != null ? (
                   <>
@@ -1510,9 +1648,12 @@ export default function VaderApp() {
                   </>
                 ) : <p style={{ fontSize: 13, color: muted }}>Ingen UV-data för platsen.</p>}
               </div>
+              )}
 
               {/* åskrisk */}
-              <div style={card}>
+              {isCardVisible("thunder") && (
+              <div style={{ ...card, position: "relative" }}>
+                <MinBtn k="thunder" />
                 <h2 style={{ ...display, fontSize: 16, fontWeight: 700, margin: "0 0 10px" }}>Åskrisk</h2>
                 {risk?.today ? (
                   <>
@@ -1542,9 +1683,10 @@ export default function VaderApp() {
                   </>
                 ) : <p style={{ fontSize: 13, color: muted }}>Ingen åskdata för platsen.</p>}
               </div>
+              )}
 
               {/* månfas */}
-              {(() => {
+              {isCardVisible("moon") && (() => {
                 const moon = moonPhase();
                 return (
                   <div style={{
@@ -1552,6 +1694,7 @@ export default function VaderApp() {
                     background: "linear-gradient(135deg, #14203A 0%, #1B2A47 60%, #24365A 100%)",
                     color: "#E8EFF6", border: "none", position: "relative", overflow: "hidden",
                   }}>
+                    <MinBtn k="moon" light />
                     <div style={{
                       position: "absolute", inset: 0, opacity: 0.25, pointerEvents: "none",
                       background: "radial-gradient(45% 40% at 78% 18%, #F5EFD8AA, transparent 70%)",
@@ -1585,7 +1728,9 @@ export default function VaderApp() {
               })()}
 
               {/* luftkvalitet & pollen */}
-              <div style={card}>
+              {isCardVisible("air") && (
+              <div style={{ ...card, position: "relative" }}>
+                <MinBtn k="air" />
                 <h2 style={{ ...display, fontSize: 16, fontWeight: 700, margin: "0 0 10px" }}>Luft & pollen</h2>
                 {air ? (
                   <>
@@ -1626,11 +1771,14 @@ export default function VaderApp() {
                   </>
                 ) : <p style={{ fontSize: 13, color: muted, margin: 0 }}>Hämtar luftdata …</p>}
               </div>
+              )}
             </section>
 
             {/* soltimmar per månad, 10 års historik */}
-            <section style={{ ...card, marginTop: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+            {isCardVisible("sun") && (
+            <section style={{ ...card, marginTop: 12, position: "relative" }}>
+              <MinBtn k="sun" />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 12, paddingRight: 30 }}>
                 <h2 style={{ ...display, fontSize: 16, fontWeight: 700, margin: 0 }}>Soltimmar per år</h2>
                 <select
                   value={sunMonth}
@@ -1694,6 +1842,25 @@ export default function VaderApp() {
                 </p>
               )}
             </section>
+            )}
+
+            {/* dolda kort som chips */}
+            {hiddenCards.length > 0 && (
+              <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: T.pageMuted }}>
+                <span>Dolda:</span>
+                {hiddenCards.map((k) => (
+                  <button key={k} onClick={() => setCardPref(k, "shown")}
+                    title={`Visa ${CARD_LABELS[k]}`}
+                    style={{
+                      padding: "5px 12px", borderRadius: 999, fontSize: 12, cursor: "pointer", ...font,
+                      border: "1px solid rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.30)",
+                      color: T.pageInk,
+                    }}>
+                    {CARD_LABELS[k]} +
+                  </button>
+                ))}
+              </div>
+            )}
 
             <footer style={{ marginTop: 20, fontSize: 11, color: T.pageMuted, textAlign: "center", position: "relative" }}>
               Data: Open-Meteo (ECMWF · GFS · ICON · MET Norway + ensemble + ERA5-arkiv) · SMHI öppna data · NOAA SWPC.
