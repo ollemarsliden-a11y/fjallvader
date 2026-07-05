@@ -779,23 +779,33 @@ function BandChart({ days, ink, muted, optimist }) {
 
 // ---------- timremsa: timme för timme med temperaturkurva ----------
 
-function HourlyStrip({ std, date, resolution, ink, muted, line, display }) {
+function HourlyStrip({ std, date, resolution, ink, muted, line, display, extendNext, allDates }) {
   const rows = useMemo(() => {
     const h = std?.hourly;
     if (!h?.temperature_2m) return [];
     const now = new Date();
+    const nowLocal = now.toLocaleDateString("sv-SE");
+    const cutoff = now.getTime() - 60 * 60 * 1000;
+    // vilka datum ska remsan täcka? idag kan sträcka sig in i imorgon
+    const wanted = new Set([date]);
+    if (extendNext && Array.isArray(allDates)) {
+      const idx = allDates.indexOf(date);
+      if (idx >= 0 && allDates[idx + 1]) wanted.add(allDates[idx + 1]);
+    }
     const out = [];
     h.time.forEach((t, i) => {
-      if (dateKey(t) !== date) return;
+      const localDate = t.slice(0, 10);
+      if (!wanted.has(localDate)) return;
       const d = new Date(t);
-      const isToday = dateKey(now.toISOString()) === date || d.toLocaleDateString("sv-SE") === now.toLocaleDateString("sv-SE");
-      if (isToday && d < now && d.getHours() < now.getHours()) return; // passerade timmar idag
-      out.push({ i, hour: d.getHours(), t: h.temperature_2m[i] });
+      if (d.getTime() < cutoff) return; // passerade timmar
+      if (h.temperature_2m[i] == null) return;
+      out.push({ i, hour: d.getHours(), t: h.temperature_2m[i], newDay: localDate !== date });
     });
-    if (resolution === 1) return out;
-    // 3-timmarsblock: sampla var tredje timme, summera nederbörd över blocket
-    return out.filter((r) => r.hour % 3 === 0).map((r) => ({ ...r, block: true }));
-  }, [std, date, resolution]);
+    // begränsa till ~30 timmar så remsan inte blir orimligt lång
+    const capped = out.slice(0, 30);
+    if (resolution === 1) return capped;
+    return capped.filter((r) => r.hour % 3 === 0).map((r) => ({ ...r, block: true }));
+  }, [std, date, resolution, extendNext, allDates]);
 
   const h = std?.hourly;
   if (!h || rows.length < 2) return null;
@@ -837,6 +847,7 @@ function HourlyStrip({ std, date, resolution, ink, muted, line, display }) {
                 borderRadius: 8,
               }}>
                 <div style={{ fontSize: 10, color: muted }}>
+                  {r.newDay && i > 0 ? dayDate(std.hourly.time[r.i].slice(0, 10)) + " " : ""}
                   {String(r.hour).padStart(2, "0")}{r.block ? "–" + String((r.hour + 3) % 24).padStart(2, "0") : ""}
                 </div>
                 <div style={{ fontSize: 15, lineHeight: "20px" }}>{wmoIcon(h.weather_code?.[r.i])}</div>
@@ -1489,6 +1500,7 @@ export default function VaderApp() {
                         {i <= 1 ? "Timme för timme" : "Var tredje timme"}
                       </div>
                       <HourlyStrip std={std} date={d.date} resolution={i <= 1 ? 1 : 3}
+                        extendNext={i === 0} allDates={days.map((x) => x.date)}
                         ink={ink} muted={muted} line={line} display={display} />
                       <div style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.05em", margin: "12px 0 4px" }}>
                         Källorna
