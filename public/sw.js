@@ -1,10 +1,10 @@
-/* Fjällväder service worker.
+/* Väderlek service worker.
    Strategi vald för att ALDRIG låsa fast en gammal version (vi har varit där):
    - Sidnavigering: alltid nätet först, cache bara som offline-reserv.
    - Byggda assets (/assets/, hashade filnamn): cache först — de ändrar namn vid varje bygge.
    - Väder-API:er (andra domäner): rörs aldrig av service workern, alltid färskt.
 */
-const CACHE = "fjallvader-v1";
+const CACHE = "vaderlek-v1";
 
 self.addEventListener("install", () => {
   self.skipWaiting();

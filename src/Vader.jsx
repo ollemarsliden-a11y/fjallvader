@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 
 /*
-  FJÄLLVÄDER v2 — flerkälls-väderapp
+  VÄDERLEK — flerkälls-väderapp
   Nytt i v2:
    • Bakgrund som anpassas efter aktuellt väder + tid på dygnet (gradient, fjällsiluett,
      regn/snö-partiklar, norrskensglöd vid hög chans)
@@ -669,6 +669,48 @@ function AuroraGlow({ reduce }) {
   );
 }
 
+// ---------- SVG-ikoner (rena linjeikoner istället för emoji i UI) ----------
+
+function IconLocate({ size = 18, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+      strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="6.5" />
+      <circle cx="12" cy="12" r="1.6" fill={color} stroke="none" />
+      <line x1="12" y1="1.5" x2="12" y2="5" />
+      <line x1="12" y1="19" x2="12" y2="22.5" />
+      <line x1="1.5" y1="12" x2="5" y2="12" />
+      <line x1="19" y1="12" x2="22.5" y2="12" />
+    </svg>
+  );
+}
+
+function IconStar({ size = 17, filled = false, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24"
+      fill={filled ? "#F0A93C" : "none"} stroke={filled ? "#F0A93C" : color}
+      strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3l2.7 5.6 6.1.8-4.5 4.3 1.1 6-5.4-2.9-5.4 2.9 1.1-6L3.2 9.4l6.1-.8z" />
+    </svg>
+  );
+}
+
+function LogoMark({ size = 40 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
+      <defs>
+        <linearGradient id="lgAurora" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#3DDC97" />
+          <stop offset="100%" stopColor="#7C5CFF" />
+        </linearGradient>
+      </defs>
+      <path d="M6 14 Q 24 2 42 12" fill="none" stroke="url(#lgAurora)" strokeWidth="2.5" strokeLinecap="round" opacity="0.9" />
+      <circle cx="33" cy="17" r="5" fill="#F0A93C" />
+      <path d="M2 40 L14 24 L22 34 L31 21 L46 40 Z" fill="currentColor" opacity="0.9" />
+    </svg>
+  );
+}
+
 // ---------- SVG: samstämmighetsband ----------
 
 function BandChart({ days, ink, muted, optimist }) {
@@ -975,39 +1017,47 @@ export default function VaderApp() {
       <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 16px 30vh", position: "relative", zIndex: 1 }}>
 
         {/* header */}
-        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-          <div>
-            <h1 style={{ ...display, fontSize: 26, fontWeight: 700, margin: 0, letterSpacing: "-0.02em" }}>
-              Fjällväder
-            </h1>
-            <p style={{ margin: "2px 0 0", fontSize: 13, color: T.pageMuted }}>
-              Fem prognoskällor. En sanning. Ungefär.
-            </p>
+        <header style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 22, textAlign: "center" }}>
+          <div style={{ color: T.pageInk, marginBottom: 4 }}>
+            <LogoMark size={42} />
           </div>
-          <div style={{ position: "relative", flex: "1 1 240px", maxWidth: 320 }}>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onFocus={() => suggestions.length && setShowSug(true)}
-                placeholder="Sök ort …"
-                aria-label="Sök ort"
-                style={{
-                  flex: 1, padding: "10px 14px", borderRadius: 12, border: `1px solid ${line}`,
-                  fontSize: 14, outline: "none", background: "rgba(255,255,255,0.92)", color: ink, ...font,
-                }}
-              />
-              <button onClick={useMyPosition} title="Använd min position" aria-label="Använd min position"
-                style={{
-                  padding: "10px 12px", borderRadius: 12, border: `1px solid ${line}`,
-                  background: "rgba(255,255,255,0.92)", cursor: "pointer", fontSize: 16,
-                }}>📍</button>
-            </div>
+          <h1 style={{
+            ...display, fontSize: 30, fontWeight: 700, margin: 0,
+            letterSpacing: "0.06em", textTransform: "uppercase",
+          }}>
+            Väderlek
+          </h1>
+          <p style={{ margin: "3px 0 16px", fontSize: 13, color: T.pageMuted, letterSpacing: "0.01em" }}>
+            Fem prognoskällor. En sanning. Ungefär.
+          </p>
+          <div style={{ position: "relative", width: "100%", maxWidth: 400 }}>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => suggestions.length && setShowSug(true)}
+              placeholder="Sök ort …"
+              aria-label="Sök ort"
+              style={{
+                width: "100%", boxSizing: "border-box", padding: "11px 46px 11px 16px",
+                borderRadius: 14, border: `1px solid ${line}`,
+                fontSize: 14, outline: "none", background: "rgba(255,255,255,0.92)", color: ink, ...font,
+              }}
+            />
+            <button onClick={useMyPosition} title="Använd min position" aria-label="Använd min position"
+              style={{
+                position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+                width: 34, height: 34, borderRadius: 10, border: "none",
+                background: "transparent", cursor: "pointer", color: muted,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+              <IconLocate />
+            </button>
             {showSug && suggestions.length > 0 && (
               <ul style={{
                 position: "absolute", top: "110%", left: 0, right: 0, zIndex: 10,
                 background: "#fff", border: `1px solid ${line}`, borderRadius: 12,
                 listStyle: "none", margin: 0, padding: 6, boxShadow: "0 8px 24px rgba(22,35,58,0.16)",
+                textAlign: "left",
               }}>
                 {suggestions.map((s, i) => (
                   <li key={i}>
@@ -1080,83 +1130,120 @@ export default function VaderApp() {
           <>
             {/* hero */}
             <section style={{ ...card, marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
-                <div>
-                  <div style={{ fontSize: 13, color: muted, marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
-                    {place.name}{place.admin ? ` · ${place.admin}` : ""}
-                    <button onClick={toggleFav} title={isFav ? "Ta bort favorit" : "Spara som favorit"}
-                      aria-label={isFav ? "Ta bort favorit" : "Spara som favorit"}
-                      style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 15, padding: 0, lineHeight: 1 }}>
-                      {isFav ? "★" : "☆"}
-                    </button>
+              {/* nivå 1: plats + nuläge */}
+              <div style={{ fontSize: 13, color: muted, marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
+                {place.name}{place.admin ? ` · ${place.admin}` : ""}
+                <button onClick={toggleFav} title={isFav ? "Ta bort favorit" : "Spara som favorit"}
+                  aria-label={isFav ? "Ta bort favorit" : "Spara som favorit"}
+                  style={{
+                    border: "none", background: "transparent", cursor: "pointer", padding: 2,
+                    lineHeight: 0, color: muted, display: "inline-flex",
+                  }}>
+                  <IconStar filled={isFav} />
+                </button>
+              </div>
+              {optimist && heroOptimist ? (
+                <>
+                  <div style={{ ...display, fontSize: 56, fontWeight: 700, lineHeight: 1 }}>
+                    {fmt0(heroOptimist.tmax)}°
                   </div>
-                  {optimist && heroOptimist ? (
-                    <>
-                      <div style={{ ...display, fontSize: 54, fontWeight: 700, lineHeight: 1 }}>
-                        {fmt0(heroOptimist.tmax)}°
-                      </div>
-                      <div style={{ fontSize: 15, marginTop: 6 }}>
-                        {wmoIcon(heroOptimist.code)} {wmoLabel(heroOptimist.code)} — enligt <strong>{modelName(heroOptimist.key)}</strong>, dagens gladaste modell
-                      </div>
-                      <div style={{ fontSize: 13, color: muted, marginTop: 4 }}>
-                        Vi säger inte att det stämmer. Vi säger att det är möjligt. ☀️
-                      </div>
-                    </>
-                  ) : cur ? (
-                    <>
-                      <div style={{ ...display, fontSize: 54, fontWeight: 700, lineHeight: 1 }}>
-                        {fmt0(cur.temperature_2m)}°
-                      </div>
-                      <div style={{ fontSize: 15, marginTop: 6 }}>
-                        {wmoIcon(cur.weather_code)} {wmoLabel(cur.weather_code)} · känns som {fmt0(cur.apparent_temperature)}°
-                      </div>
-                      <div style={{ fontSize: 13, color: muted, marginTop: 4 }}>
-                        Vind {fmt0(cur.wind_speed_10m / 3.6)} m/s · molntäcke {fmt0(cur.cloud_cover)} %
-                        {snowCm != null && ` · snödjup ${snowCm} cm ❄️`}
-                      </div>
-                      {dayLight && (
-                        <div style={{ fontSize: 13, color: muted, marginTop: 4 }}>
-                          ☀ {dayLight.rise}–{dayLight.set} · {dayLight.hours} t {dayLight.mins} min
+                  <div style={{ fontSize: 15, marginTop: 6 }}>
+                    {wmoIcon(heroOptimist.code)} {wmoLabel(heroOptimist.code)} — enligt <strong>{modelName(heroOptimist.key)}</strong>, dagens gladaste modell
+                  </div>
+                  <div style={{ fontSize: 13, color: muted, marginTop: 4 }}>
+                    Vi säger inte att det stämmer. Vi säger att det är möjligt. ☀️
+                  </div>
+                </>
+              ) : cur ? (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                    <div style={{ ...display, fontSize: 56, fontWeight: 700, lineHeight: 1 }}>
+                      {fmt0(cur.temperature_2m)}°
+                    </div>
+                    <div style={{ fontSize: 15 }}>
+                      <span style={{ fontSize: 22, marginRight: 6 }}>{wmoIcon(cur.weather_code)}</span>
+                      {wmoLabel(cur.weather_code)}
+                      <div style={{ fontSize: 13, color: muted }}>känns som {fmt0(cur.apparent_temperature)}°</div>
+                    </div>
+                  </div>
+
+                  {/* nivå 2: mätarrutor */}
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                    gap: 8, marginTop: 16,
+                  }}>
+                    <div style={{ background: "rgba(22,35,58,0.04)", borderRadius: 12, padding: "9px 12px" }}>
+                      <div style={{ fontSize: 10, color: muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Vind</div>
+                      <div style={{ ...display, fontSize: 16, fontWeight: 700 }}>{fmt0(cur.wind_speed_10m / 3.6)} m/s</div>
+                    </div>
+                    <div style={{ background: "rgba(22,35,58,0.04)", borderRadius: 12, padding: "9px 12px" }}>
+                      <div style={{ fontSize: 10, color: muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Molntäcke</div>
+                      <div style={{ ...display, fontSize: 16, fontWeight: 700 }}>{fmt0(cur.cloud_cover)} %</div>
+                    </div>
+                    {dayLight && (
+                      <div style={{ background: "rgba(22,35,58,0.04)", borderRadius: 12, padding: "9px 12px" }}>
+                        <div style={{ fontSize: 10, color: muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Dagsljus</div>
+                        <div style={{ ...display, fontSize: 16, fontWeight: 700 }}>
+                          {dayLight.hours} t {dayLight.mins} min
                           {dayLight.delta != null && dayLight.delta !== 0 && (
-                            <span style={{ fontWeight: 500, color: dayLight.delta > 0 ? "#3E8E63" : "#2D6FB4" }}>
-                              {" "}({dayLight.delta > 0 ? "+" : ""}{dayLight.delta} min sedan igår)
+                            <span style={{ fontSize: 12, fontWeight: 600, marginLeft: 5, color: dayLight.delta > 0 ? "#3E8E63" : "#2D6FB4" }}>
+                              {dayLight.delta > 0 ? "+" : ""}{dayLight.delta}
                             </span>
                           )}
                         </div>
-                      )}
-                      {todayDelta != null && Math.abs(todayDelta) >= 0.5 && (
-                        <button
-                          onClick={() => setShowYears(!showYears)}
-                          aria-expanded={showYears}
-                          style={{
-                            display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6,
-                            padding: 0, border: "none", background: "transparent", cursor: "pointer",
-                            fontSize: 13, fontWeight: 500, textAlign: "left",
-                            color: todayDelta > 0 ? "#B4552D" : "#2D6FB4", ...font,
-                          }}>
-                          {Math.abs(fmt1(todayDelta))}° {todayDelta > 0 ? "varmare" : "kallare"} än normalt för den {dayDate(days[0].date)}
-                          <span style={{ color: muted, fontWeight: 400 }}> (snitt senaste 10 åren)</span>
-                          <span style={{ color: muted, fontSize: 11, transform: showYears ? "rotate(180deg)" : "none", transition: "transform .2s" }}>▾</span>
-                        </button>
-                      )}
-                      {showYears && todayNormal?.years?.length > 0 && (
-                        <div style={{ marginTop: 10, borderTop: `1px solid ${line}`, paddingTop: 10 }}>
-                          <div style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                            Den {dayDate(days[0].date)}, år för år
-                          </div>
-                          {(() => {
-                            const yrs = todayNormal.years;
-                            const highs = yrs.map((y) => y.tmax);
-                            const warmest = Math.max(...highs), coldest = Math.min(...highs);
-                            const warmYear = yrs.find((y) => y.tmax === warmest);
-                            const coldYear = yrs.find((y) => y.tmax === coldest);
-                            return (
-                              <>
-                                <div style={{ fontSize: 12, marginBottom: 8 }}>
-                                  <span style={{ color: "#B4552D", fontWeight: 600 }}>Rekord att slå: {fmt1(warmest)}° ({warmYear.year})</span>
-                                  <span style={{ color: muted }}> · kallast: {fmt1(coldest)}° ({coldYear.year})</span>
-                                </div>
-                                {yrs.map((y) => {
+                        <div style={{ fontSize: 11, color: muted }}>{dayLight.rise}–{dayLight.set}</div>
+                      </div>
+                    )}
+                    {todayDelta != null && (
+                      <button
+                        onClick={() => setShowYears(!showYears)}
+                        aria-expanded={showYears}
+                        style={{
+                          background: "rgba(22,35,58,0.04)", borderRadius: 12, padding: "9px 12px",
+                          border: "none", cursor: "pointer", textAlign: "left", ...font,
+                        }}>
+                        <div style={{ fontSize: 10, color: muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Mot normalt</div>
+                        <div style={{
+                          ...display, fontSize: 16, fontWeight: 700,
+                          color: Math.abs(todayDelta) < 0.5 ? ink : todayDelta > 0 ? "#B4552D" : "#2D6FB4",
+                        }}>
+                          {todayDelta > 0 ? "+" : ""}{fmt1(todayDelta)}°
+                          <span style={{
+                            fontSize: 11, color: muted, marginLeft: 5, display: "inline-block",
+                            transform: showYears ? "rotate(180deg)" : "none", transition: "transform .2s",
+                          }}>▾</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: muted }}>år för år</div>
+                      </button>
+                    )}
+                    {snowCm != null && (
+                      <div style={{ background: "rgba(22,35,58,0.04)", borderRadius: 12, padding: "9px 12px" }}>
+                        <div style={{ fontSize: 10, color: muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Snödjup</div>
+                        <div style={{ ...display, fontSize: 16, fontWeight: 700 }}>{snowCm} cm</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* utfällning: år för år */}
+                  {showYears && todayNormal?.years?.length > 0 && (
+                    <div style={{ marginTop: 12, borderTop: `1px solid ${line}`, paddingTop: 10 }}>
+                      <div style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                        Den {dayDate(days[0].date)}, år för år · snitt senaste 10 åren
+                      </div>
+                      {(() => {
+                        const yrs = todayNormal.years;
+                        const highs = yrs.map((y) => y.tmax);
+                        const warmest = Math.max(...highs), coldest = Math.min(...highs);
+                        const warmYear = yrs.find((y) => y.tmax === warmest);
+                        const coldYear = yrs.find((y) => y.tmax === coldest);
+                        return (
+                          <>
+                            <div style={{ fontSize: 12, marginBottom: 8 }}>
+                              <span style={{ color: "#B4552D", fontWeight: 600 }}>Rekord att slå: {fmt1(warmest)}° ({warmYear.year})</span>
+                              <span style={{ color: muted }}> · kallast: {fmt1(coldest)}° ({coldYear.year})</span>
+                            </div>
+                            {yrs.map((y) => {
                               const isWarm = y.tmax === warmest, isCold = y.tmax === coldest;
                               const pct = clamp(((y.tmax - coldest) / (warmest - coldest || 1)) * 100, 0, 100);
                               return (
@@ -1175,17 +1262,35 @@ export default function VaderApp() {
                                 </div>
                               );
                             })}
-                              </>
-                            );
-                          })()}
-                          <div style={{ fontSize: 11, color: muted, marginTop: 8 }}>
-                            Dagens maxtemp: {fmt1(days[0].consensus.tmax)}°. Staplarna visar dagstemperaturen samma datum varje år.
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  ) : null}
-                </div>
+                          </>
+                        );
+                      })()}
+                      <div style={{ fontSize: 11, color: muted, marginTop: 8 }}>
+                        Dagens maxtemp: {fmt1(days[0].consensus.tmax)}°. Staplarna visar dagstemperaturen samma datum varje år.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* nivå 3: statusrad */}
+                  {heroDay?.agreement && (
+                    <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: heroDay.agreement.color, display: "inline-block" }} />
+                      <span style={{ color: muted }}>
+                        {heroDay.agreement.label}
+                        {heroDay.ens?.rainProb != null && ` · ${heroDay.ens.rainProb} % regnchans`}
+                      </span>
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </section>
+
+            {/* band 16 dagar */}
+            <section style={{ ...card, marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+                <h2 style={{ ...display, fontSize: 16, fontWeight: 700, margin: 0 }}>
+                  {optimist ? "16 dagar enligt de gladaste källorna" : "16 dagar enligt alla källor"}
+                </h2>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none" }}>
                   <span style={{ fontSize: 13, color: muted }}>Optimistläge</span>
                   <button
@@ -1204,26 +1309,10 @@ export default function VaderApp() {
                   </button>
                 </label>
               </div>
-              {heroDay?.agreement && !optimist && (
-                <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: heroDay.agreement.color, display: "inline-block" }} />
-                  <span style={{ color: muted }}>{heroDay.agreement.label} mellan källorna idag</span>
-                  {heroDay.ens?.rainProb != null && (
-                    <span style={{ color: muted }}>· 💧 {heroDay.ens.rainProb} % regnchans</span>
-                  )}
-                </div>
-              )}
-            </section>
-
-            {/* band 16 dagar */}
-            <section style={{ ...card, marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6, flexWrap: "wrap", gap: 4 }}>
-                <h2 style={{ ...display, fontSize: 16, fontWeight: 700, margin: 0 }}>
-                  {optimist ? "16 dagar enligt de gladaste källorna" : "16 dagar enligt alla källor"}
-                </h2>
-                <span style={{ fontSize: 12, color: muted }}>bandet = källornas + ensemblens spridning</span>
-              </div>
               <BandChart days={days} ink={ink} muted={muted} optimist={optimist} />
+              <p style={{ fontSize: 11, color: muted, margin: "6px 0 0", textAlign: "center" }}>
+                {optimist ? "optimistens linje följer bandets överkant" : "bandet visar källornas och ensemblens spridning"}
+              </p>
             </section>
 
             {/* dagkort 1–7 */}
