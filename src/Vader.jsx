@@ -499,16 +499,23 @@ async function fetchSmhi(lat, lon) {
   const j = await r.json();
   const days = {};
   let prev = null;
+  const clean = (v) => (v == null || v === 9999 ? null : v); // 9999 = saknat värde
   for (const ts of j.timeSeries) {
-    const key = dateKey(ts.validTime);
-    const p = Object.fromEntries(ts.parameters.map((x) => [x.name, x.values[0]]));
+    const key = dateKey(ts.time || ts.validTime); // nya API:et: "time"
+    // nya API:et: platt data-objekt med läsbara namn; fall tillbaka på gamla format
+    const p = ts.data || Object.fromEntries((ts.parameters || []).map((x) => [x.name, x.values[0]]));
+    const t = clean(p.air_temperature ?? p.t);
+    const pmean = clean(p.precipitation_amount_mean ?? p.pmean);
+    const ws = clean(p.wind_speed ?? p.ws);
+    const sym = clean(p.symbol_code ?? p.Wsymb2);
     if (!days[key]) days[key] = { temps: [], precip: 0, winds: [], codes: [] };
-    const stepH = prev ? clamp((new Date(ts.validTime) - prev) / 3600000, 1, 12) : 1;
-    prev = new Date(ts.validTime);
-    if (p.t != null) days[key].temps.push(p.t);
-    if (p.pmean != null) days[key].precip += p.pmean * stepH;
-    if (p.ws != null) days[key].winds.push(p.ws);
-    if (p.Wsymb2 != null) days[key].codes.push(p.Wsymb2);
+    const tsTime = new Date(ts.time || ts.validTime);
+    const stepH = prev ? clamp((tsTime - prev) / 3600000, 1, 12) : 1;
+    prev = tsTime;
+    if (t != null) days[key].temps.push(t);
+    if (pmean != null) days[key].precip += pmean * stepH;
+    if (ws != null) days[key].winds.push(ws);
+    if (sym != null) days[key].codes.push(sym);
   }
   const out = {};
   for (const [key, d] of Object.entries(days)) {

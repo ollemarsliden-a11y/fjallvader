@@ -14,7 +14,7 @@ export default async (req) => {
   }
 
   const smhiUrl =
-    `https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2/geotype/point/` +
+    `https://opendata-download-metfcst.smhi.se/api/category/snow1g/version/1/geotype/point/` +
     `lon/${lon.toFixed(4)}/lat/${lat.toFixed(4)}/data.json`;
 
   try {
