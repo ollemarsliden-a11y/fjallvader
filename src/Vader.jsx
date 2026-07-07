@@ -256,10 +256,13 @@ function moodLine(mood, code, tmax, dateStr) {
   return arr[idx] || "";
 }
 
-const MOODS = [
-  { key: "pessimist", label: "Pessimist", emoji: "🌧️" },
-  { key: "normal", label: "Normal", emoji: "😐" },
-  { key: "optimist", label: "Optimist", emoji: "☀️" },
+const SOURCES = [
+  { key: "consensus", label: "Konsensus" },
+  { key: "ecmwf_ifs025", label: "ECMWF" },
+  { key: "gfs_seamless", label: "GFS" },
+  { key: "icon_seamless", label: "ICON" },
+  { key: "metno_seamless", label: "Yr" },
+  { key: "smhi", label: "SMHI" },
 ];
 
 function agreementForDay(perModel, ens) {
@@ -943,8 +946,8 @@ function LogoMark({ size = 40 }) {
 
 // ---------- SVG: samstämmighetsband ----------
 
-function BandChart({ days, ink, muted, mood }) {
-  const optimist = mood === "optimist", pessimist = mood === "pessimist";
+function BandChart({ days, ink, muted, source }) {
+  const isConsensus = !source || source === "consensus";
   const W = 700, H = 200, PAD = 34;
   const pts = days.map((d) => {
     const highs = Object.values(d.perModel).map((m) => m.tmax).filter((v) => v != null);
@@ -953,10 +956,11 @@ function BandChart({ days, ink, muted, mood }) {
     if (d.ens?.tmaxP10 != null) { highs.push(d.ens.tmaxP90); lows.push(d.ens.tmaxP10); }
     const hi = highs.length ? Math.max(...highs) : null;
     const lo = lows.length ? Math.min(...lows) : null;
+    // vald modells maxlinje, annars konsensus
+    const modelHi = isConsensus ? null : d.perModel?.[source]?.tmax;
     return {
       hi, lo,
-      // optimisten surfar på bandets överkant
-      cHi: optimist ? hi : pessimist ? lo : (d.consensus.tmax ?? d.ens?.tmaxP50 ?? null),
+      cHi: !isConsensus && modelHi != null ? modelHi : (d.consensus.tmax ?? d.ens?.tmaxP50 ?? null),
       cLo: d.consensus.tmin,
     };
   }).filter((p) => p.hi != null && p.lo != null);
@@ -1128,15 +1132,14 @@ export default function VaderApp() {
   const [ensemble, setEnsemble] = useState(null);
   const [normals, setNormals] = useState(null);
   const [kp, setKp] = useState(null);
-  const [mood, setMoodState] = useState(() => {
-    try { return localStorage.getItem("vaderlek_mood") || "normal"; } catch { return "normal"; }
+  const [source, setSourceState] = useState(() => {
+    try { return localStorage.getItem("vaderlek_source") || "consensus"; } catch { return "consensus"; }
   });
-  function setMood(m) {
-    setMoodState(m);
-    try { localStorage.setItem("vaderlek_mood", m); } catch { /* fullt */ }
+  function setSource(s) {
+    setSourceState(s);
+    try { localStorage.setItem("vaderlek_source", s); } catch { /* fullt */ }
   }
-  const optimist = mood === "optimist";
-  const pessimist = mood === "pessimist";
+  const isConsensus = source === "consensus";
   const [openDay, setOpenDay] = useState(null);
   const [showYears, setShowYears] = useState(false);
   const [sunHistory, setSunHistory] = useState(null);
@@ -1223,15 +1226,22 @@ export default function VaderApp() {
   const nearDays = days.slice(0, NEAR_DAYS);
   const farDays = days.slice(NEAR_DAYS);
 
+  // vy för en dag utifrån vald källa: konsensus eller en specifik modell
+  const sourceView = (d) => {
+    if (!d) return null;
+    if (isConsensus) return d.consensus;
+    return d.perModel?.[source] || d.consensus; // modellen kanske inte täcker dagen
+  };
+
   const bestDayIdx = useMemo(() => {
     let idx = -1, best = -Infinity;
     nearDays.forEach((d, i) => {
-      const v = optimist && d.best ? d.best : pessimist && d.worst ? d.worst : d.consensus;
+      const v = isConsensus ? d.consensus : (d.perModel?.[source] || d.consensus);
       const s = fineScore(v);
       if (s > best) { best = s; idx = i; }
     });
     return idx;
-  }, [nearDays, optimist, pessimist]);
+  }, [nearDays, source, isConsensus]);
 
   const auroraNights = useMemo(() => {
     if (!kp || !std?.hourly) return [];
@@ -1252,21 +1262,13 @@ export default function VaderApp() {
     return nights.slice(0, 3);
   }, [kp, std, place.lat]);
 
-  // Bakgrundstemat är stämningsdekor: optimist ljusnar, pessimist grånar.
-  // Nulägets siffror i hjärtat påverkas INTE — de speglar alltid mätt väder.
+  // Bakgrundstemat speglar det verkliga aktuella vädret.
   const cur = std?.current;
-  const baseTheme = themeKey(cur?.weather_code, cur ? cur.is_day === 1 : true);
-  const tKey = optimist ? "clearDay" : pessimist ? (cur && cur.is_day === 0 ? "cloudNight" : "overcast") : baseTheme;
+  const tKey = themeKey(cur?.weather_code, cur ? cur.is_day === 1 : true);
   const T = THEMES[tKey];
-  const auroraTonight = !optimist && T.dark && (auroraNights[0]?.chance ?? 0) >= 40;
+  const auroraTonight = T.dark && (auroraNights[0]?.chance ?? 0) >= 40;
 
   // vald vy per dag utifrån humörläge
-  const moodView = (d) => {
-    if (!d) return null;
-    if (optimist) return d.best || d.consensus;
-    if (pessimist) return d.worst || d.consensus;
-    return d.consensus;
-  };
 
   // normaljämförelse för idag
   const todayNormal = normals?.[mmdd(days[0]?.date || new Date().toISOString())];
@@ -1582,11 +1584,8 @@ export default function VaderApp() {
                       <div style={{ fontSize: 13, color: muted }}>känns som {fmt0(cur.apparent_temperature)}°</div>
                     </div>
                   </div>
-                  <div style={{
-                    fontSize: 14, marginTop: 10, fontWeight: optimist || pessimist ? 500 : 400,
-                    color: optimist ? "#B8860B" : pessimist ? "#5B6B7A" : muted,
-                  }}>
-                    {moodLine(mood, cur.weather_code, cur.temperature_2m, heroDay?.date)}
+                  <div style={{ fontSize: 14, marginTop: 10, color: muted }}>
+                    {moodLine("normal", cur.weather_code, cur.temperature_2m, heroDay?.date)}
                   </div>
 
                   {/* nivå 2: mätarrutor */}
@@ -1718,37 +1717,40 @@ export default function VaderApp() {
               </div>
             </section>
 
-            {/* humörväljare — styr prognosen nedan */}
+            {/* modellväljare — styr prognosen nedan */}
             <div style={{ marginBottom: 16 }}>
               <div style={{
-                display: "flex", gap: 4, padding: 4,
+                display: "flex", gap: 6, padding: 5, overflowX: "auto",
                 background: "rgba(255,255,255,0.55)", borderRadius: 14,
-                border: "1px solid rgba(255,255,255,0.5)",
+                border: "1px solid rgba(255,255,255,0.5)", WebkitOverflowScrolling: "touch",
               }}>
-                {MOODS.map((m) => {
-                  const active = mood === m.key;
-                  const activeBg = m.key === "optimist"
-                    ? "linear-gradient(135deg, #F0A93C, #F5C869)"
-                    : m.key === "pessimist" ? "linear-gradient(135deg, #5B7089, #74899E)" : "#fff";
+                {SOURCES.map((s) => {
+                  const active = source === s.key;
+                  // gråa ut modeller som inte täcker vald plats (t.ex. SMHI utanför Norden)
+                  const available = s.key === "consensus" || (heroDay?.perModel && heroDay.perModel[s.key]);
                   return (
-                    <button key={m.key} onClick={() => setMood(m.key)}
+                    <button key={s.key}
+                      onClick={() => available && setSource(s.key)}
+                      disabled={!available}
                       aria-pressed={active}
                       style={{
-                        flex: 1, padding: "9px 6px", borderRadius: 11, border: "none", cursor: "pointer",
-                        ...font, fontSize: 13, fontWeight: active ? 700 : 500,
-                        background: active ? activeBg : "transparent",
-                        color: active ? (m.key === "normal" ? ink : "#fff") : "#3C5D7A",
-                        boxShadow: active ? "0 1px 4px rgba(22,35,58,0.15)" : "none",
-                        transition: "all .2s", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                        flex: "0 0 auto", padding: "8px 16px", borderRadius: 999, border: "none",
+                        cursor: available ? "pointer" : "default", ...font,
+                        fontSize: 13, fontWeight: active ? 700 : 500, whiteSpace: "nowrap",
+                        background: active ? "#16233A" : "transparent",
+                        color: active ? "#fff" : available ? "#3C5D7A" : "#AEBBC8",
+                        boxShadow: active ? "0 1px 4px rgba(22,35,58,0.2)" : "none",
+                        transition: "all .2s",
                       }}>
-                      <MoodIcon kind={m.key} size={16}
-                        color={active ? (m.key === "normal" ? ink : "#fff") : "#3C5D7A"} /> {m.label}
+                      {s.label}
                     </button>
                   );
                 })}
               </div>
               <p style={{ fontSize: 11, color: T.pageMuted, margin: "6px 2px 0", textAlign: "center" }}>
-                Färgar prognosen nedan efter humör — nuläget står kvar som det är.
+                {isConsensus
+                  ? "Visar snittet av alla källor. Välj en modell för att se dagen genom just den."
+                  : `Visar prognosen enligt ${SOURCES.find((s) => s.key === source)?.label}. Nuläget står kvar som mätt.`}
               </p>
             </div>
 
@@ -1756,16 +1758,16 @@ export default function VaderApp() {
             <section style={{ ...card, marginBottom: 16 }}>
               <div style={{ marginBottom: 8 }}>
                 <h2 style={{ ...display, fontSize: 16, fontWeight: 700, margin: 0 }}>
-                  {optimist ? "16 dagar enligt de gladaste källorna"
-                    : pessimist ? "16 dagar enligt de dystraste källorna"
-                    : "16 dagar enligt alla källor"}
+                  {isConsensus
+                    ? "16 dagar enligt alla källor"
+                    : `16 dagar enligt ${SOURCES.find((s) => s.key === source)?.label}`}
                 </h2>
               </div>
-              <BandChart days={days} ink={ink} muted={muted} mood={mood} />
+              <BandChart days={days} ink={ink} muted={muted} source={source} />
               <p style={{ fontSize: 11, color: muted, margin: "6px 0 0", textAlign: "center" }}>
-                {optimist ? "optimistens linje följer bandets överkant"
-                  : pessimist ? "pessimistens linje följer bandets underkant"
-                  : "bandet visar källornas och ensemblens spridning"}
+                {isConsensus
+                  ? "bandet visar källornas och ensemblens spridning"
+                  : `linjen visar ${SOURCES.find((s) => s.key === source)?.label}, bandet övriga källors spridning`}
               </p>
             </section>
 
@@ -1785,8 +1787,8 @@ export default function VaderApp() {
             {/* dagkort 1–7 */}
             <section style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
               {nearDays.map((d, i) => {
-                const view = optimist && d.best ? d.best : pessimist && d.worst ? d.worst : d.consensus;
-                const moodModel = optimist ? d.best : pessimist ? d.worst : null;
+                const view = sourceView(d);
+                const showModelNote = !isConsensus && d.perModel?.[source];
                 return (
                 <div key={d.date} id={`day-${i}`} style={{ ...card, padding: 0, overflow: "hidden", scrollMarginTop: 12 }}>
                   <button
@@ -1804,12 +1806,7 @@ export default function VaderApp() {
                     <div style={{ fontSize: 22 }}>{wmoIcon(view.code)}</div>
                     <div style={{ fontSize: 13, color: muted }}>
                       {wmoLabel(view.code)}
-                      {moodModel && (
-                        <span style={{ marginLeft: 6, fontSize: 11, color: optimist ? "#B8860B" : "#5B6B7A" }}>
-                          {modelName(moodModel.key)} {optimist ? "☀️" : "🌧️"}
-                        </span>
-                      )}
-                      {!optimist && !pessimist && d.ens?.rainProb != null && d.ens.rainProb >= 20 && (
+                      {isConsensus && d.ens?.rainProb != null && d.ens.rainProb >= 20 && (
                         <span style={{ marginLeft: 6 }}>💧 {d.ens.rainProb} %</span>
                       )}
                       {i === bestDayIdx && (
@@ -1819,7 +1816,7 @@ export default function VaderApp() {
                         }}>Veckans finaste ✨</span>
                       )}
                     </div>
-                    {!optimist && !pessimist && d.agreement ? (
+                    {isConsensus && d.agreement ? (
                       <span title={d.agreement.label} style={{
                         fontSize: 11, color: d.agreement.color, fontWeight: 600, whiteSpace: "nowrap",
                       }}>{d.agreement.short}</span>
@@ -1845,11 +1842,11 @@ export default function VaderApp() {
                         </thead>
                         <tbody>
                           {Object.entries(d.perModel).map(([k, m]) => {
-                            const isBest = d.best?.key === k, isWorst = d.worst?.key === k;
+                            const isSelected = !isConsensus && k === source;
                             return (
-                            <tr key={k} style={{ borderTop: `1px solid ${line}` }}>
-                              <td style={{ padding: "6px 0", fontWeight: (isBest || isWorst) ? 600 : 400 }}>
-                                {modelName(k)}{isBest ? " ☀️" : ""}{isWorst && !isBest ? " 🌧️" : ""}
+                            <tr key={k} style={{ borderTop: `1px solid ${line}`, background: isSelected ? "rgba(22,35,58,0.05)" : "transparent" }}>
+                              <td style={{ padding: "6px 0", fontWeight: isSelected ? 700 : 400 }}>
+                                {modelName(k)}{isSelected ? " ●" : ""}
                               </td>
                               <td style={{ textAlign: "right" }}>{fmt1(m.tmax)}°</td>
                               <td style={{ textAlign: "right" }}>{fmt1(m.tmin)}°</td>
@@ -1870,7 +1867,7 @@ export default function VaderApp() {
                         {normals?.[mmdd(d.date)] && (
                           <span>Normalt för den {dayDate(d.date)}: {fmt0(normals[mmdd(d.date)].tmax)}° / {fmt0(normals[mmdd(d.date)].tmin)}°</span>
                         )}
-                        <span>☀️ optimistens val · 🌧️ pessimistens val.{" "}
+                        <span>{!isConsensus && "● vald modell. "}
                           {smhiErr === "out_of_area" && "SMHI täcker inte den här platsen — visar övriga källor."}
                           {smhiErr === "error" && "SMHI kunde inte nås just nu — visar övriga källor."}
                           {smhiErr === "local" && "SMHI visas först på den publicerade sajten, inte lokalt."}
@@ -1889,14 +1886,13 @@ export default function VaderApp() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexWrap: "wrap", gap: 4 }}>
                   <h2 style={{ ...display, fontSize: 16, fontWeight: 700, margin: 0 }}>Längre fram</h2>
                   <span style={{ fontSize: 12, color: muted }}>
-                    {optimist ? "så bra kan det bli, om allt vill sig väl"
-                      : pessimist ? "så illa kan det gå, om oturen är framme"
-                      : "spann och sannolikhet — inte exakta löften"}
+                    spann och sannolikhet — inte exakta löften
                   </span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column" }}>
                   {farDays.map((d) => {
-                    const viewCode = optimist && d.best ? d.best.code : pessimist && d.worst ? d.worst.code : d.consensus.code;
+                    const mv = sourceView(d);
+                    const viewCode = mv.code;
                     return (
                     <div key={d.date} style={{
                       display: "grid", gridTemplateColumns: "82px 32px 1fr auto", alignItems: "center",
@@ -1908,34 +1904,26 @@ export default function VaderApp() {
                       </div>
                       <div style={{ fontSize: 18 }}>{wmoIcon(viewCode)}</div>
                       <div style={{ color: muted }}>
-                        {optimist
-                          ? <span style={{ color: "#B8860B", fontSize: 12 }}>bästa fallet ☀️</span>
-                          : pessimist
-                            ? <span style={{ color: "#5B6B7A", fontSize: 12 }}>värsta fallet 🌧️</span>
-                            : (d.ens?.rainProb != null ? `💧 ${d.ens.rainProb} %` : "—")}
+                        {d.ens?.rainProb != null ? `💧 ${d.ens.rainProb} %` : "—"}
                         <span style={{ marginLeft: 10, fontSize: 11 }}>
                           {d.sources} {d.sources === 1 ? "källa" : "källor"}{d.ens ? " + ensemble" : ""}
                         </span>
                       </div>
                       <div style={{ ...display, fontWeight: 700, whiteSpace: "nowrap" }}>
-                        {optimist && d.ens?.tmaxP90 != null
-                          ? `upp till ${fmt0(d.ens.tmaxP90)}°`
-                          : pessimist && d.ens?.tmaxP10 != null
-                            ? `ner mot ${fmt0(d.ens.tmaxP10)}°`
-                            : d.ens?.tmaxP10 != null
-                              ? `${fmt0(d.ens.tmaxP10)}–${fmt0(d.ens.tmaxP90)}°`
-                              : `${fmt0(optimist && d.best ? d.best.tmax : pessimist && d.worst ? d.worst.tmax : d.consensus.tmax)}°`}
+                        {!isConsensus && d.perModel?.[source]?.tmax != null
+                          ? `${fmt0(d.perModel[source].tmax)}°`
+                          : d.ens?.tmaxP10 != null
+                            ? `${fmt0(d.ens.tmaxP10)}–${fmt0(d.ens.tmaxP90)}°`
+                            : `${fmt0(d.consensus.tmax)}°`}
                       </div>
                     </div>
                     );
                   })}
                 </div>
                 <p style={{ fontSize: 12, color: muted, margin: "10px 0 0" }}>
-                  {optimist
-                    ? "Visar ensemblens soligaste tiondel. Vi säger inte att det stämmer. Vi säger att det är möjligt."
-                    : pessimist
-                      ? "Visar ensemblens dystraste tiondel. Det blir nog inte så illa. Förmodligen."
-                      : "Temperaturspannet täcker 80 % av ensemblens körningar. Ju bredare spann, desto osäkrare dag."}
+                  {isConsensus
+                    ? "Temperaturspannet täcker 80 % av ensemblens körningar. Ju bredare spann, desto osäkrare dag."
+                    : `Enligt ${SOURCES.find((s) => s.key === source)?.label} där den räcker, annars ensemblens spann.`}
                 </p>
               </section>
             )}
