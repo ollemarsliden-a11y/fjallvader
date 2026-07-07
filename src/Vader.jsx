@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
+const MapView = lazy(() => import("./MapView.jsx"));
 
 /*
   VÄDERLEK — flerkälls-väderapp
@@ -870,6 +871,17 @@ function AuroraGlow({ reduce }) {
 
 // ---------- SVG-ikoner (rena linjeikoner istället för emoji i UI) ----------
 
+function IconMap({ size = 16, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 4 L3 6 V20 L9 18 L15 20 L21 18 V4 L15 6 L9 4 Z" />
+      <line x1="9" y1="4" x2="9" y2="18" />
+      <line x1="15" y1="6" x2="15" y2="20" />
+    </svg>
+  );
+}
+
 function IconLocate({ size = 18, color = "currentColor" }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
@@ -1120,6 +1132,7 @@ export default function VaderApp() {
     try { localStorage.setItem("vaderlek_place", JSON.stringify(p)); } catch { /* fullt */ }
   }
   const [locating, setLocating] = useState(false);
+  const [showMap, setShowMap] = useState(false);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [showSug, setShowSug] = useState(false);
@@ -1515,7 +1528,26 @@ export default function VaderApp() {
               </ul>
             )}
           </div>
+          <button onClick={() => setShowMap(true)} style={{
+            display: "inline-flex", alignItems: "center", gap: 7, marginTop: 12,
+            padding: "8px 18px", borderRadius: 999, cursor: "pointer", ...font,
+            fontSize: 13, fontWeight: 600, color: "#3C5D7A",
+            border: `1px solid ${line}`, background: "rgba(255,255,255,0.7)",
+          }}>
+            <IconMap size={16} color="#3C5D7A" /> Regnradar
+          </button>
         </header>
+
+        {showMap && (
+          <Suspense fallback={
+            <div style={{
+              position: "fixed", inset: 0, zIndex: 1000, background: "#16233A", color: "#fff",
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, ...font,
+            }}>Laddar karta …</div>
+          }>
+            <MapView place={place} onClose={() => setShowMap(false)} />
+          </Suspense>
+        )}
 
         {/* favoritplatser */}
         {favorites.length > 0 && (
