@@ -296,6 +296,21 @@ async function geocode(q) {
   }));
 }
 
+// Omvänd geokodning: hitta närmaste ortnamn för en koordinat (BigDataCloud, gratis, keyless).
+async function reverseGeocode(lat, lon) {
+  try {
+    const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=sv`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error("no");
+    const j = await r.json();
+    const name = j.city || j.locality || j.principalSubdivision || "Min position";
+    const admin = [j.principalSubdivision, j.countryName].filter(Boolean).join(", ");
+    return { name, admin };
+  } catch {
+    return { name: "Min position", admin: "" };
+  }
+}
+
 async function fetchMultiModel(lat, lon) {
   const daily = "temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,weather_code,sunshine_duration";
   const models = MODELS.map((m) => m.key).join(",");
@@ -307,7 +322,7 @@ async function fetchMultiModel(lat, lon) {
 
 async function fetchStandard(lat, lon) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-    `&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,cloud_cover,is_day` +
+    `&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,cloud_cover,is_day` +
     `&daily=uv_index_max,sunrise,sunset&hourly=cloud_cover,cape,weather_code,snow_depth,temperature_2m,precipitation,precipitation_probability,wind_speed_10m&timezone=auto&past_days=1&forecast_days=7`;
   const r = await fetch(url);
   if (!r.ok) throw new Error("Open-Meteo svarade inte");
@@ -751,6 +766,94 @@ function Particles({ kind, wind = 0, reduce }) {
   );
 }
 
+// ---------- animerad väderscen i nulägeskortet ----------
+// Vindstyrd: partiklar driver i vindens riktning, lutning/fart efter styrka.
+function WeatherScene({ code, isDay, windDir, windKmh, reduce }) {
+  const kind = weatherKind(code, null);
+  const isSnow = kind === "snow";
+  const isRain = ["rain", "thunder"].includes(kind);
+  const isThunder = kind === "thunder";
+  const isCloud = ["cloud", "partly", "fog"].includes(kind);
+  const isClear = kind === "clear";
+
+  const dir = windDir ?? 0;
+  const tilt = clamp((windKmh ?? 0) / 3, 0, 32) * (dir > 180 ? 1 : -1);
+  const speedFactor = clamp(1 - (windKmh ?? 0) / 120, 0.45, 1);
+
+  const particles = useMemo(() => {
+    const n = isSnow ? 34 : isRain ? 54 : 0;
+    return Array.from({ length: n }, (_, i) => ({
+      left: Math.random() * 110 - 5,
+      delay: Math.random() * 4,
+      dur: (isSnow ? 5.5 + Math.random() * 5 : 1.0 + Math.random() * 0.7) * speedFactor,
+      size: isSnow ? 3 + Math.random() * 4 : 9 + Math.random() * 12,
+      op: 0.3 + Math.random() * 0.4,
+      key: i,
+    }));
+  }, [isSnow, isRain, speedFactor]);
+
+  const clouds = useMemo(() => (isCloud ? Array.from({ length: 3 }, (_, i) => ({
+    top: 12 + i * 22, scale: 0.7 + Math.random() * 0.5,
+    dur: 40 + Math.random() * 30, delay: -Math.random() * 40, op: 0.5 - i * 0.1, key: i,
+  })) : []), [isCloud]);
+
+  return (
+    <div aria-hidden="true" style={{
+      position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", borderRadius: 20,
+    }}>
+      {isClear && isDay && (
+        <div style={{
+          position: "absolute", top: "-30%", right: "-10%", width: "70%", height: "120%",
+          background: "radial-gradient(circle, rgba(255,214,120,0.5), transparent 65%)",
+          animation: reduce ? "none" : "fv-glow 8s ease-in-out infinite alternate",
+        }} />
+      )}
+      {isClear && !isDay && [...Array(18)].map((_, i) => (
+        <span key={i} style={{
+          position: "absolute", width: 2, height: 2, borderRadius: "50%", background: "#fff",
+          top: `${Math.random() * 70}%`, left: `${Math.random() * 100}%`, opacity: 0.5 + Math.random() * 0.4,
+          animation: reduce ? "none" : `fv-twinkle ${2 + Math.random() * 3}s ease-in-out ${Math.random() * 3}s infinite`,
+        }} />
+      ))}
+      {clouds.map((c) => (
+        <div key={c.key} style={{
+          position: "absolute", top: `${c.top}%`, left: "-30%",
+          width: 120, height: 34, opacity: c.op,
+          transform: `scale(${c.scale})`,
+          background: "radial-gradient(50% 100% at 30% 60%, #fff 60%, transparent), radial-gradient(45% 100% at 60% 50%, #fff 60%, transparent), radial-gradient(40% 90% at 80% 65%, #fff 60%, transparent)",
+          filter: "blur(2px)",
+          animation: reduce ? "none" : `fv-drift ${c.dur}s linear ${c.delay}s infinite`,
+        }} />
+      ))}
+      {(isRain || isSnow) && (
+        <div style={{ position: "absolute", inset: "-15% -10%", transform: `rotate(${tilt}deg)` }}>
+          {particles.map((p) => isSnow ? (
+            <span key={p.key} style={{
+              position: "absolute", top: "-6%", left: `${p.left}%`,
+              width: p.size, height: p.size, borderRadius: "50%",
+              background: "rgba(255,255,255,0.9)", opacity: p.op,
+              animation: reduce ? "none" : `fv-scene-snow ${p.dur}s linear ${p.delay}s infinite`,
+            }} />
+          ) : (
+            <span key={p.key} style={{
+              position: "absolute", top: "-6%", left: `${p.left}%`,
+              width: 1.6, height: p.size, borderRadius: 2,
+              background: "rgba(210,228,245,0.7)", opacity: p.op,
+              animation: reduce ? "none" : `fv-scene-fall ${p.dur}s linear ${p.delay}s infinite`,
+            }} />
+          ))}
+        </div>
+      )}
+      {isThunder && !reduce && (
+        <div style={{
+          position: "absolute", inset: 0, background: "rgba(255,255,255,0.7)",
+          animation: "fv-flash 7s steps(1) infinite", opacity: 0,
+        }} />
+      )}
+    </div>
+  );
+}
+
 function AuroraGlow({ reduce }) {
   return (
     <div aria-hidden="true" style={{
@@ -1001,7 +1104,18 @@ function HourlyStrip({ std, date, resolution, ink, muted, line, display, extendN
 // ---------- huvudkomponent ----------
 
 export default function VaderApp() {
-  const [place, setPlace] = useState(DEFAULT_PLACE);
+  const [place, setPlaceState] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("vaderlek_place") || "null");
+      if (saved && typeof saved.lat === "number" && typeof saved.lon === "number") return saved;
+    } catch { /* korrupt — använd default */ }
+    return DEFAULT_PLACE;
+  });
+  function setPlace(p) {
+    setPlaceState(p);
+    try { localStorage.setItem("vaderlek_place", JSON.stringify(p)); } catch { /* fullt */ }
+  }
+  const [locating, setLocating] = useState(false);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [showSug, setShowSug] = useState(false);
@@ -1138,7 +1252,8 @@ export default function VaderApp() {
     return nights.slice(0, 3);
   }, [kp, std, place.lat]);
 
-  // tema utifrån aktuellt väder. Optimist tvingar sol, pessimist drar mot grått.
+  // Bakgrundstemat är stämningsdekor: optimist ljusnar, pessimist grånar.
+  // Nulägets siffror i hjärtat påverkas INTE — de speglar alltid mätt väder.
   const cur = std?.current;
   const baseTheme = themeKey(cur?.weather_code, cur ? cur.is_day === 1 : true);
   const tKey = optimist ? "clearDay" : pessimist ? (cur && cur.is_day === 0 ? "cloudNight" : "overcast") : baseTheme;
@@ -1244,16 +1359,27 @@ export default function VaderApp() {
       }}>–</button>
   );
   function useMyPosition() {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      setErr("Din enhet stöder inte positionshämtning. Sök på ort istället.");
+      return;
+    }
+    setLocating(true);
     navigator.geolocation.getCurrentPosition(
-      (pos) => setPlace({ name: "Min position", admin: "", lat: pos.coords.latitude, lon: pos.coords.longitude }),
-      () => setErr("Kunde inte hämta din position. Sök på ort istället."),
-      { timeout: 8000 }
+      async (pos) => {
+        const { latitude: lat, longitude: lon } = pos.coords;
+        const named = await reverseGeocode(lat, lon);
+        setPlace({ name: named.name, admin: named.admin, lat, lon });
+        setLocating(false);
+      },
+      () => {
+        setErr("Kunde inte hämta din position. Kontrollera att du gett appen platstillstånd, eller sök på ort istället.");
+        setLocating(false);
+      },
+      { timeout: 8000, enableHighAccuracy: false }
     );
   }
 
   const heroDay = days[0];
-  const heroOptimist = heroDay?.best;
 
   const ink = "#16233A", muted = "#5B7089", line = "#DCE5EC";
   const font = { fontFamily: "'Inter', system-ui, sans-serif" };
@@ -1277,10 +1403,24 @@ export default function VaderApp() {
           from { opacity: 0.55; transform: translateX(-3%) scaleY(1); }
           to { opacity: 1; transform: translateX(3%) scaleY(1.12); }
         }
+        @keyframes fv-scene-fall { from { transform: translateY(-10%); } to { transform: translateY(360px); } }
+        @keyframes fv-scene-snow {
+          0% { transform: translateY(-10%) translateX(0); }
+          50% { transform: translateY(160px) translateX(14px); }
+          100% { transform: translateY(360px) translateX(-8px); }
+        }
+        @keyframes fv-glow { from { opacity: 0.6; transform: scale(1); } to { opacity: 1; transform: scale(1.08); } }
+        @keyframes fv-spin { to { transform: rotate(360deg); } }
+        @keyframes fv-twinkle { 0%,100% { opacity: 0.2; } 50% { opacity: 0.9; } }
+        @keyframes fv-drift { from { transform: translateX(0); } to { transform: translateX(160%); } }
+        @keyframes fv-flash {
+          0%, 96%, 100% { opacity: 0; }
+          97%, 99% { opacity: 0; }
+          98% { opacity: 0.55; }
+        }
       `}</style>
 
       <Fjall colors={T.fjall} />
-      <Particles kind={T.particles} wind={cur?.wind_speed_10m ?? 0} reduce={reduceMotion} />
       {auroraTonight && <AuroraGlow reduce={reduceMotion} />}
 
       <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 16px 30vh", position: "relative", zIndex: 1 }}>
@@ -1312,14 +1452,20 @@ export default function VaderApp() {
                 fontSize: 14, outline: "none", background: "rgba(255,255,255,0.92)", color: ink, ...font,
               }}
             />
-            <button onClick={useMyPosition} title="Använd min position" aria-label="Använd min position"
+            <button onClick={useMyPosition} disabled={locating} title="Använd min position" aria-label="Använd min position"
               style={{
                 position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
                 width: 34, height: 34, borderRadius: 10, border: "none",
-                background: "transparent", cursor: "pointer", color: muted,
+                background: "transparent", cursor: locating ? "default" : "pointer", color: muted,
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-              <IconLocate />
+              {locating ? (
+                <span style={{
+                  width: 16, height: 16, borderRadius: "50%",
+                  border: `2px solid ${line}`, borderTopColor: muted,
+                  display: "inline-block", animation: "fv-spin 0.7s linear infinite",
+                }} />
+              ) : <IconLocate />}
             </button>
             {showSug && suggestions.length > 0 && (
               <ul style={{
@@ -1398,34 +1544,20 @@ export default function VaderApp() {
         ) : days.length > 0 && (
           <>
             {/* hero */}
-            <section style={{ ...card, marginBottom: 16 }}>
-              {/* humörväljare — appens signatur */}
-              <div style={{
-                display: "flex", gap: 4, padding: 4, marginBottom: 16,
-                background: "rgba(22,35,58,0.05)", borderRadius: 14,
-              }}>
-                {MOODS.map((m) => {
-                  const active = mood === m.key;
-                  const activeBg = m.key === "optimist"
-                    ? "linear-gradient(135deg, #F0A93C, #F5C869)"
-                    : m.key === "pessimist" ? "linear-gradient(135deg, #5B7089, #74899E)" : "#fff";
-                  return (
-                    <button key={m.key} onClick={() => setMood(m.key)}
-                      aria-pressed={active}
-                      style={{
-                        flex: 1, padding: "9px 6px", borderRadius: 11, border: "none", cursor: "pointer",
-                        ...font, fontSize: 13, fontWeight: active ? 700 : 500,
-                        background: active ? activeBg : "transparent",
-                        color: active ? (m.key === "normal" ? ink : "#fff") : muted,
-                        boxShadow: active ? "0 1px 4px rgba(22,35,58,0.15)" : "none",
-                        transition: "all .2s", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                      }}>
-                      <MoodIcon kind={m.key} size={16}
-                        color={active ? (m.key === "normal" ? ink : "#fff") : muted} /> {m.label}
-                    </button>
-                  );
-                })}
-              </div>
+            <section style={{ ...card, marginBottom: 16, position: "relative", overflow: "hidden" }}>
+              {cur && (
+                <WeatherScene
+                  code={cur.weather_code} isDay={cur.is_day === 1}
+                  windDir={cur.wind_direction_10m} windKmh={cur.wind_speed_10m}
+                  reduce={reduceMotion}
+                />
+              )}
+              {/* läsbarhetsplatta mellan scen och innehåll */}
+              <div aria-hidden="true" style={{
+                position: "absolute", inset: 0, borderRadius: 20, pointerEvents: "none",
+                background: "linear-gradient(180deg, rgba(255,255,255,0.32) 0%, rgba(255,255,255,0.62) 45%, rgba(255,255,255,0.82) 100%)",
+              }} />
+              <div style={{ position: "relative", zIndex: 1 }}>
               {/* nivå 1: plats + nuläge */}
               <div style={{ fontSize: 13, color: muted, marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
                 {place.name}{place.admin ? ` · ${place.admin}` : ""}
@@ -1438,31 +1570,7 @@ export default function VaderApp() {
                   <IconStar filled={isFav} />
                 </button>
               </div>
-              {optimist && heroOptimist ? (
-                <>
-                  <div style={{ ...display, fontSize: 56, fontWeight: 700, lineHeight: 1 }}>
-                    {fmt0(heroOptimist.tmax)}°
-                  </div>
-                  <div style={{ fontSize: 15, marginTop: 6 }}>
-                    {wmoIcon(heroOptimist.code)} {wmoLabel(heroOptimist.code)} — enligt <strong>{modelName(heroOptimist.key)}</strong>, dagens gladaste modell
-                  </div>
-                  <div style={{ fontSize: 14, marginTop: 8, fontWeight: 500, color: "#B8860B" }}>
-                    {moodLine("optimist", heroOptimist.code, heroOptimist.tmax, heroDay.date)}
-                  </div>
-                </>
-              ) : pessimist && heroDay?.worst ? (
-                <>
-                  <div style={{ ...display, fontSize: 56, fontWeight: 700, lineHeight: 1 }}>
-                    {fmt0(heroDay.worst.tmax)}°
-                  </div>
-                  <div style={{ fontSize: 15, marginTop: 6 }}>
-                    {wmoIcon(heroDay.worst.code)} {wmoLabel(heroDay.worst.code)} — enligt <strong>{modelName(heroDay.worst.key)}</strong>, dagens dystraste modell
-                  </div>
-                  <div style={{ fontSize: 14, marginTop: 8, fontWeight: 500, color: "#5B6B7A" }}>
-                    {moodLine("pessimist", heroDay.worst.code, heroDay.worst.tmax, heroDay.date)}
-                  </div>
-                </>
-              ) : cur ? (
+              {cur ? (
                 <>
                   <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
                     <div style={{ ...display, fontSize: 56, fontWeight: 700, lineHeight: 1 }}>
@@ -1474,8 +1582,11 @@ export default function VaderApp() {
                       <div style={{ fontSize: 13, color: muted }}>känns som {fmt0(cur.apparent_temperature)}°</div>
                     </div>
                   </div>
-                  <div style={{ fontSize: 14, marginTop: 10, color: muted }}>
-                    {moodLine("normal", cur.weather_code, cur.temperature_2m, heroDay?.date)}
+                  <div style={{
+                    fontSize: 14, marginTop: 10, fontWeight: optimist || pessimist ? 500 : 400,
+                    color: optimist ? "#B8860B" : pessimist ? "#5B6B7A" : muted,
+                  }}>
+                    {moodLine(mood, cur.weather_code, cur.temperature_2m, heroDay?.date)}
                   </div>
 
                   {/* nivå 2: mätarrutor */}
@@ -1604,7 +1715,42 @@ export default function VaderApp() {
                   </div>
                 </>
               ) : null}
+              </div>
             </section>
+
+            {/* humörväljare — styr prognosen nedan */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{
+                display: "flex", gap: 4, padding: 4,
+                background: "rgba(255,255,255,0.55)", borderRadius: 14,
+                border: "1px solid rgba(255,255,255,0.5)",
+              }}>
+                {MOODS.map((m) => {
+                  const active = mood === m.key;
+                  const activeBg = m.key === "optimist"
+                    ? "linear-gradient(135deg, #F0A93C, #F5C869)"
+                    : m.key === "pessimist" ? "linear-gradient(135deg, #5B7089, #74899E)" : "#fff";
+                  return (
+                    <button key={m.key} onClick={() => setMood(m.key)}
+                      aria-pressed={active}
+                      style={{
+                        flex: 1, padding: "9px 6px", borderRadius: 11, border: "none", cursor: "pointer",
+                        ...font, fontSize: 13, fontWeight: active ? 700 : 500,
+                        background: active ? activeBg : "transparent",
+                        color: active ? (m.key === "normal" ? ink : "#fff") : "#3C5D7A",
+                        boxShadow: active ? "0 1px 4px rgba(22,35,58,0.15)" : "none",
+                        transition: "all .2s", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      }}>
+                      <MoodIcon kind={m.key} size={16}
+                        color={active ? (m.key === "normal" ? ink : "#fff") : "#3C5D7A"} /> {m.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p style={{ fontSize: 11, color: T.pageMuted, margin: "6px 2px 0", textAlign: "center" }}>
+                Färgar prognosen nedan efter humör — nuläget står kvar som det är.
+              </p>
+            </div>
 
             {/* band 16 dagar */}
             <section style={{ ...card, marginBottom: 16 }}>
