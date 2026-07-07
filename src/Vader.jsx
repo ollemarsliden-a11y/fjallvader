@@ -1057,10 +1057,10 @@ function HourlyStrip({ std, date, resolution, ink, muted, line, display, extendN
   const h = std?.hourly;
   if (!h || rows.length < 2) return null;
 
-  const COL = 48, CURVE_H = 42;
+  const COL = 62, CURVE_H = 46;
   const temps = rows.map((r) => r.t).filter((v) => v != null);
   const tMin = Math.min(...temps), tMax = Math.max(...temps);
-  const y = (v) => 6 + (CURVE_H - 16) * (1 - (v - tMin) / (tMax - tMin || 1));
+  const y = (v) => 8 + (CURVE_H - 20) * (1 - (v - tMin) / (tMax - tMin || 1));
   const curvePath = rows.map((r, i) => `${i ? "L" : "M"}${i * COL + COL / 2},${y(r.t)}`).join("");
 
   const precipOf = (r) => {
@@ -1085,28 +1085,28 @@ function HourlyStrip({ std, date, resolution, ink, muted, line, display, extendN
           {rows.map((r, i) => {
             const prob = probOf(r);
             const mm = precipOf(r);
-            // regnchans-toning: ljus vid uppehåll, blågrå ton när körningarna spretar mot regn
             const tint = prob != null ? Math.min(prob / 100, 1) * 0.22 : 0;
             return (
               <div key={i} style={{
-                width: COL, textAlign: "center", padding: "5px 2px 7px",
+                width: COL, textAlign: "center", padding: "6px 2px 8px",
                 background: tint > 0.02 ? `rgba(45,111,180,${tint})` : "transparent",
                 borderRadius: 8,
               }}>
-                <div style={{ fontSize: 10, color: muted }}>
+                <div style={{ fontSize: 12, color: muted, fontWeight: 500 }}>
                   {r.newDay && i > 0 ? dayDate(std.hourly.time[r.i].slice(0, 10)) + " " : ""}
                   {String(r.hour).padStart(2, "0")}{r.block ? "–" + String((r.hour + 3) % 24).padStart(2, "0") : ""}
                 </div>
-                <div style={{ fontSize: 15, lineHeight: "20px" }}>{wmoIcon(h.weather_code?.[r.i])}</div>
-                <div style={{ ...display, fontSize: 13, fontWeight: 700, color: ink }}>{fmt0(r.t)}°</div>
-                <div style={{ fontSize: 9.5, color: "#2D6FB4", minHeight: 12, fontWeight: prob >= 50 ? 600 : 400 }}>
+                <div style={{ fontSize: 20, lineHeight: "26px", margin: "2px 0" }}>{wmoIcon(h.weather_code?.[r.i])}</div>
+                <div style={{ ...display, fontSize: 16, fontWeight: 700, color: ink }}>{fmt0(r.t)}°</div>
+                <div style={{ fontSize: 11, color: "#2D6FB4", minHeight: 14, fontWeight: prob >= 50 ? 700 : 500, marginTop: 2 }}>
                   {prob != null && prob >= 20 ? `${prob} %` : ""}
                 </div>
-                <div style={{ fontSize: 9.5, color: muted, minHeight: 11 }}>
+                <div style={{ fontSize: 11, color: muted, minHeight: 13 }}>
                   {mm >= 0.1 ? `${fmt1(mm)} mm` : ""}
                 </div>
-                <div style={{ fontSize: 9.5, color: muted }}>
-                  {h.wind_speed_10m?.[r.i] != null ? `${fmt0(h.wind_speed_10m[r.i] / 3.6)} m/s` : ""}
+                <div style={{ fontSize: 11, color: muted }}>
+                  {h.wind_speed_10m?.[r.i] != null ? `${fmt0(h.wind_speed_10m[r.i] / 3.6)}` : ""}
+                  {h.wind_speed_10m?.[r.i] != null && <span style={{ fontSize: 9, opacity: 0.7 }}> m/s</span>}
                 </div>
               </div>
             );
@@ -1405,6 +1405,11 @@ export default function VaderApp() {
   const heroDay = days[0];
 
   const ink = "#16233A", muted = "#5B7089", line = "#DCE5EC";
+  // nulägeskortets textfärger följer vädertemat (mörk text på ljusa teman, ljus på mörka)
+  const heroInk = T.pageInk;
+  const heroMuted = T.pageMuted;
+  // rutornas bakgrund i hjärtat: ljus på mörka teman, mörk på ljusa
+  const heroTile = T.dark ? "rgba(255,255,255,0.12)" : "rgba(22,35,58,0.06)";
   const font = { fontFamily: "'Inter', system-ui, sans-serif" };
   const display = { fontFamily: "'Space Grotesk', 'Inter', sans-serif" };
   const card = {
@@ -1600,8 +1605,12 @@ export default function VaderApp() {
           </div>
         ) : days.length > 0 && (
           <>
-            {/* hero */}
-            <section style={{ ...card, marginBottom: 16, position: "relative", overflow: "hidden" }}>
+            {/* hero — kortet ÄR vädret: temats bakgrund + textväxling */}
+            <section style={{
+              ...card, marginBottom: 16, position: "relative", overflow: "hidden",
+              background: T.bg,
+              border: T.dark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(255,255,255,0.5)",
+            }}>
               {cur && (
                 <WeatherScene
                   code={cur.weather_code} isDay={cur.is_day === 1}
@@ -1609,37 +1618,39 @@ export default function VaderApp() {
                   reduce={reduceMotion}
                 />
               )}
-              {/* läsbarhetsplatta mellan scen och innehåll */}
+              {/* mjuk scrim för läsbarhet — mörk på ljusa teman, ljus på mörka */}
               <div aria-hidden="true" style={{
                 position: "absolute", inset: 0, borderRadius: 20, pointerEvents: "none",
-                background: "linear-gradient(180deg, rgba(255,255,255,0.32) 0%, rgba(255,255,255,0.62) 45%, rgba(255,255,255,0.82) 100%)",
+                background: T.dark
+                  ? "linear-gradient(180deg, rgba(10,18,30,0.10) 0%, rgba(10,18,30,0.28) 100%)"
+                  : "linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.30) 100%)",
               }} />
               <div style={{ position: "relative", zIndex: 1 }}>
               {/* nivå 1: plats + nuläge */}
-              <div style={{ fontSize: 13, color: muted, marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ fontSize: 13, color: heroMuted, marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
                 {place.name}{place.admin ? ` · ${place.admin}` : ""}
                 <button onClick={toggleFav} title={isFav ? "Ta bort favorit" : "Spara som favorit"}
                   aria-label={isFav ? "Ta bort favorit" : "Spara som favorit"}
                   style={{
                     border: "none", background: "transparent", cursor: "pointer", padding: 2,
-                    lineHeight: 0, color: muted, display: "inline-flex",
+                    lineHeight: 0, color: heroMuted, display: "inline-flex",
                   }}>
                   <IconStar filled={isFav} />
                 </button>
               </div>
               {cur ? (
                 <>
-                  <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", color: heroInk }}>
                     <div style={{ ...display, fontSize: 56, fontWeight: 700, lineHeight: 1 }}>
                       {fmt0(cur.temperature_2m)}°
                     </div>
                     <div style={{ fontSize: 15 }}>
                       <span style={{ fontSize: 22, marginRight: 6 }}>{wmoIcon(cur.weather_code)}</span>
                       {wmoLabel(cur.weather_code)}
-                      <div style={{ fontSize: 13, color: muted }}>känns som {fmt0(cur.apparent_temperature)}°</div>
+                      <div style={{ fontSize: 13, color: heroMuted }}>känns som {fmt0(cur.apparent_temperature)}°</div>
                     </div>
                   </div>
-                  <div style={{ fontSize: 14, marginTop: 10, color: muted }}>
+                  <div style={{ fontSize: 14, marginTop: 10, color: heroMuted }}>
                     {moodLine("normal", cur.weather_code, cur.temperature_2m, heroDay?.date)}
                   </div>
 
@@ -1647,28 +1658,28 @@ export default function VaderApp() {
                   <div style={{
                     display: "grid",
                     gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
-                    gap: 8, marginTop: 16,
+                    gap: 8, marginTop: 16, color: heroInk,
                   }}>
-                    <div style={{ background: "rgba(22,35,58,0.04)", borderRadius: 12, padding: "9px 12px" }}>
-                      <div style={{ fontSize: 10, color: muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Vind</div>
+                    <div style={{ background: heroTile, borderRadius: 12, padding: "9px 12px" }}>
+                      <div style={{ fontSize: 10, color: heroMuted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Vind</div>
                       <div style={{ ...display, fontSize: 16, fontWeight: 700 }}>{fmt0(cur.wind_speed_10m / 3.6)} m/s</div>
                     </div>
-                    <div style={{ background: "rgba(22,35,58,0.04)", borderRadius: 12, padding: "9px 12px" }}>
-                      <div style={{ fontSize: 10, color: muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Molntäcke</div>
+                    <div style={{ background: heroTile, borderRadius: 12, padding: "9px 12px" }}>
+                      <div style={{ fontSize: 10, color: heroMuted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Molntäcke</div>
                       <div style={{ ...display, fontSize: 16, fontWeight: 700 }}>{fmt0(cur.cloud_cover)} %</div>
                     </div>
                     {dayLight && (
-                      <div style={{ background: "rgba(22,35,58,0.04)", borderRadius: 12, padding: "9px 12px" }}>
-                        <div style={{ fontSize: 10, color: muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Dagsljus</div>
+                      <div style={{ background: heroTile, borderRadius: 12, padding: "9px 12px" }}>
+                        <div style={{ fontSize: 10, color: heroMuted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Dagsljus</div>
                         <div style={{ ...display, fontSize: 16, fontWeight: 700 }}>
                           {dayLight.hours} t {dayLight.mins} min
                           {dayLight.delta != null && dayLight.delta !== 0 && (
-                            <span style={{ fontSize: 12, fontWeight: 600, marginLeft: 5, color: dayLight.delta > 0 ? "#3E8E63" : "#2D6FB4" }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, marginLeft: 5, color: T.dark ? (dayLight.delta > 0 ? "#8FE0B4" : "#9CC2F0") : (dayLight.delta > 0 ? "#3E8E63" : "#2D6FB4") }}>
                               {dayLight.delta > 0 ? "+" : ""}{dayLight.delta}
                             </span>
                           )}
                         </div>
-                        <div style={{ fontSize: 11, color: muted }}>{dayLight.rise}–{dayLight.set}</div>
+                        <div style={{ fontSize: 11, color: heroMuted }}>{dayLight.rise}–{dayLight.set}</div>
                       </div>
                     )}
                     {todayDelta != null && (
@@ -1676,26 +1687,26 @@ export default function VaderApp() {
                         onClick={() => setShowYears(!showYears)}
                         aria-expanded={showYears}
                         style={{
-                          background: "rgba(22,35,58,0.04)", borderRadius: 12, padding: "9px 12px",
-                          border: "none", cursor: "pointer", textAlign: "left", ...font,
+                          background: heroTile, borderRadius: 12, padding: "9px 12px",
+                          border: "none", cursor: "pointer", textAlign: "left", ...font, color: heroInk,
                         }}>
-                        <div style={{ fontSize: 10, color: muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Mot normalt</div>
+                        <div style={{ fontSize: 10, color: heroMuted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Mot normalt</div>
                         <div style={{
                           ...display, fontSize: 16, fontWeight: 700,
-                          color: Math.abs(todayDelta) < 0.5 ? ink : todayDelta > 0 ? "#B4552D" : "#2D6FB4",
+                          color: Math.abs(todayDelta) < 0.5 ? heroInk : T.dark ? (todayDelta > 0 ? "#F0B48C" : "#9CC2F0") : (todayDelta > 0 ? "#B4552D" : "#2D6FB4"),
                         }}>
                           {todayDelta > 0 ? "+" : ""}{fmt1(todayDelta)}°
                           <span style={{
-                            fontSize: 11, color: muted, marginLeft: 5, display: "inline-block",
+                            fontSize: 11, color: heroMuted, marginLeft: 5, display: "inline-block",
                             transform: showYears ? "rotate(180deg)" : "none", transition: "transform .2s",
                           }}>▾</span>
                         </div>
-                        <div style={{ fontSize: 11, color: muted }}>år för år</div>
+                        <div style={{ fontSize: 11, color: heroMuted }}>år för år</div>
                       </button>
                     )}
                     {snowCm != null && (
-                      <div style={{ background: "rgba(22,35,58,0.04)", borderRadius: 12, padding: "9px 12px" }}>
-                        <div style={{ fontSize: 10, color: muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Snödjup</div>
+                      <div style={{ background: heroTile, borderRadius: 12, padding: "9px 12px" }}>
+                        <div style={{ fontSize: 10, color: heroMuted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Snödjup</div>
                         <div style={{ ...display, fontSize: 16, fontWeight: 700 }}>{snowCm} cm</div>
                       </div>
                     )}
@@ -1752,7 +1763,7 @@ export default function VaderApp() {
                     {heroDay?.agreement ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ width: 8, height: 8, borderRadius: "50%", background: heroDay.agreement.color, display: "inline-block" }} />
-                        <span style={{ color: muted }}>
+                        <span style={{ color: heroMuted }}>
                           {heroDay.agreement.label}
                           {heroDay.ens?.rainProb != null && ` · ${heroDay.ens.rainProb} % regnchans`}
                         </span>
@@ -1762,7 +1773,7 @@ export default function VaderApp() {
                       onClick={() => document.getElementById("timstrip")?.scrollIntoView({ behavior: "smooth", block: "start" })}
                       style={{
                         border: "none", background: "transparent", cursor: "pointer", padding: 0,
-                        fontSize: 13, color: "#2D6FB4", fontWeight: 500, ...font,
+                        fontSize: 13, color: T.dark ? "#9CC2F0" : "#2D6FB4", fontWeight: 600, ...font,
                       }}>
                       Timme för timme ▾
                     </button>
