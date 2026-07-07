@@ -1607,9 +1607,11 @@ export default function VaderApp() {
           <>
             {/* hero — kortet ÄR vädret: temats bakgrund + textväxling */}
             <section style={{
-              ...card, marginBottom: 16, position: "relative", overflow: "hidden",
+              borderRadius: 20, padding: "20px 22px", marginBottom: 16,
+              position: "relative", overflow: "hidden",
               background: T.bg,
-              border: T.dark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(255,255,255,0.5)",
+              boxShadow: "0 2px 12px rgba(16,27,49,0.14)",
+              border: T.dark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(255,255,255,0.4)",
             }}>
               {cur && (
                 <WeatherScene
@@ -1618,12 +1620,12 @@ export default function VaderApp() {
                   reduce={reduceMotion}
                 />
               )}
-              {/* mjuk scrim för läsbarhet — mörk på ljusa teman, ljus på mörka */}
+              {/* scrim: ger djup + läsbarhet, och skiljer kortet från sidan bakom */}
               <div aria-hidden="true" style={{
                 position: "absolute", inset: 0, borderRadius: 20, pointerEvents: "none",
                 background: T.dark
-                  ? "linear-gradient(180deg, rgba(10,18,30,0.10) 0%, rgba(10,18,30,0.28) 100%)"
-                  : "linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.30) 100%)",
+                  ? "linear-gradient(160deg, rgba(255,255,255,0.14) 0%, rgba(10,18,30,0.30) 100%)"
+                  : "linear-gradient(160deg, rgba(255,255,255,0.45) 0%, rgba(22,40,64,0.06) 55%, rgba(22,40,64,0.14) 100%)",
               }} />
               <div style={{ position: "relative", zIndex: 1 }}>
               {/* nivå 1: plats + nuläge */}
