@@ -1827,37 +1827,13 @@ export default function VaderApp() {
                   </button>
                   {openDay === i && (
                     <div style={{ borderTop: `1px solid ${line}`, padding: "12px 18px 16px", fontSize: 13 }}>
-                      <div style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.05em", margin: "0 0 4px" }}>
-                        Källorna
+                      <div style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.05em", margin: "0 0 6px" }}>
+                        {i <= 1 ? "Timme för timme" : "Var tredje timme"}
                       </div>
-                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                        <thead>
-                          <tr style={{ color: muted, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                            <th style={{ textAlign: "left", padding: "4px 0" }}>Källa</th>
-                            <th style={{ textAlign: "right" }}>Max</th>
-                            <th style={{ textAlign: "right" }}>Min</th>
-                            <th style={{ textAlign: "right" }}>Nederbörd</th>
-                            <th style={{ textAlign: "right" }}>Vind</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Object.entries(d.perModel).map(([k, m]) => {
-                            const isSelected = !isConsensus && k === source;
-                            return (
-                            <tr key={k} style={{ borderTop: `1px solid ${line}`, background: isSelected ? "rgba(22,35,58,0.05)" : "transparent" }}>
-                              <td style={{ padding: "6px 0", fontWeight: isSelected ? 700 : 400 }}>
-                                {modelName(k)}{isSelected ? " ●" : ""}
-                              </td>
-                              <td style={{ textAlign: "right" }}>{fmt1(m.tmax)}°</td>
-                              <td style={{ textAlign: "right" }}>{fmt1(m.tmin)}°</td>
-                              <td style={{ textAlign: "right" }}>{fmt1(m.precip)} mm</td>
-                              <td style={{ textAlign: "right" }}>{m.wind != null ? fmt0(m.wind / 3.6) + " m/s" : "–"}</td>
-                            </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                      <div style={{ marginTop: 8, color: muted, fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
+                      <HourlyStrip std={std} date={d.date} resolution={i <= 1 ? 1 : 3}
+                        extendNext={i === 0} allDates={days.map((x) => x.date)}
+                        ink={ink} muted={muted} line={line} display={display} />
+                      <div style={{ marginTop: 10, color: muted, fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
                         {d.ens && (
                           <span>
                             Ensemble ({d.ens.members} GFS-körningar): maxtemp troligen {fmt0(d.ens.tmaxP10)}–{fmt0(d.ens.tmaxP90)}°
@@ -1867,11 +1843,7 @@ export default function VaderApp() {
                         {normals?.[mmdd(d.date)] && (
                           <span>Normalt för den {dayDate(d.date)}: {fmt0(normals[mmdd(d.date)].tmax)}° / {fmt0(normals[mmdd(d.date)].tmin)}°</span>
                         )}
-                        <span>{!isConsensus && "● vald modell. "}
-                          {smhiErr === "out_of_area" && "SMHI täcker inte den här platsen — visar övriga källor."}
-                          {smhiErr === "error" && "SMHI kunde inte nås just nu — visar övriga källor."}
-                          {smhiErr === "local" && "SMHI visas först på den publicerade sajten, inte lokalt."}
-                        </span>
+                        {smhiErr === "out_of_area" && <span>SMHI täcker inte den här platsen — visar övriga källor.</span>}
                       </div>
                     </div>
                   )}
