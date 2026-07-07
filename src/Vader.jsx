@@ -100,6 +100,11 @@ function themeKey(code, isDay) {
   return isDay ? "clearDay" : "clearNight";
 }
 
+// dov, neutral sidbakgrund — kortet bär vädertemat, sidan är lugn atmosfär
+const PAGE_BG = "linear-gradient(180deg, #E7ECF1 0%, #DEE4EA 100%)";
+const PAGE_INK = "#1E2A38";
+const PAGE_MUTED = "#5B6B7A";
+
 const THEMES = {
   clearDay: {
     bg: "linear-gradient(180deg, #7FBFF0 0%, #B7DEF8 42%, #F4E4BD 100%)",
@@ -1419,7 +1424,7 @@ export default function VaderApp() {
   };
 
   return (
-    <div style={{ ...font, minHeight: "100vh", background: T.bg, color: T.pageInk, transition: "background 1.2s ease", position: "relative" }}>
+    <div style={{ ...font, minHeight: "100vh", background: PAGE_BG, color: PAGE_INK, transition: "background .6s ease", position: "relative" }}>
       <style>{`
         @keyframes fv-fall { from { transform: translateY(0); } to { transform: translateY(115vh); } }
         @keyframes fv-snow {
@@ -1455,7 +1460,7 @@ export default function VaderApp() {
 
         {/* header */}
         <header style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 22, textAlign: "center" }}>
-          <div style={{ color: T.pageInk, marginBottom: 4 }}>
+          <div style={{ color: PAGE_INK, marginBottom: 4 }}>
             <LogoMark size={42} />
           </div>
           <h1 style={{
@@ -1464,7 +1469,7 @@ export default function VaderApp() {
           }}>
             Väderlek
           </h1>
-          <p style={{ margin: "3px 0 12px", fontSize: 13, color: T.pageMuted, letterSpacing: "0.01em" }}>
+          <p style={{ margin: "3px 0 12px", fontSize: 13, color: PAGE_MUTED, letterSpacing: "0.01em" }}>
             Fem prognoskällor. En sanning. Ungefär.
           </p>
           <button
@@ -1564,7 +1569,7 @@ export default function VaderApp() {
                   padding: "6px 14px", borderRadius: 999, fontSize: 13, cursor: "pointer", ...font,
                   border: active ? "1px solid transparent" : "1px solid rgba(255,255,255,0.5)",
                   background: active ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.35)",
-                  color: active ? ink : T.pageInk, fontWeight: active ? 600 : 400,
+                  color: active ? ink : PAGE_INK, fontWeight: active ? 600 : 400,
                 }}>
                   {f.name}
                 </button>
@@ -1816,7 +1821,7 @@ export default function VaderApp() {
                 })}
               </div>
               </div>
-              <p style={{ fontSize: 11, color: T.pageMuted, margin: "6px 2px 0", textAlign: "center" }}>
+              <p style={{ fontSize: 11, color: PAGE_MUTED, margin: "6px 2px 0", textAlign: "center" }}>
                 {optimist
                   ? "Optimistläget visar den gladaste modellen per dag. Stäng av det för att välja källa själv."
                   : isConsensus
@@ -2245,7 +2250,7 @@ export default function VaderApp() {
 
             {/* dolda kort som chips */}
             {hiddenCards.length > 0 && (
-              <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: T.pageMuted }}>
+              <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: PAGE_MUTED }}>
                 <span>Dolda:</span>
                 {hiddenCards.map((k) => (
                   <button key={k} onClick={() => setCardPref(k, "shown")}
@@ -2253,7 +2258,7 @@ export default function VaderApp() {
                     style={{
                       padding: "5px 12px", borderRadius: 999, fontSize: 12, cursor: "pointer", ...font,
                       border: "1px solid rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.30)",
-                      color: T.pageInk,
+                      color: PAGE_INK,
                     }}>
                     {CARD_LABELS[k]} +
                   </button>
@@ -2261,7 +2266,7 @@ export default function VaderApp() {
               </div>
             )}
 
-            <footer style={{ marginTop: 20, fontSize: 11, color: T.pageMuted, textAlign: "center", position: "relative" }}>
+            <footer style={{ marginTop: 20, fontSize: 11, color: PAGE_MUTED, textAlign: "center", position: "relative" }}>
               Data: Open-Meteo (ECMWF · GFS · ICON · MET Norway + ensemble + ERA5-arkiv) · SMHI öppna data · NOAA SWPC.
               Normaler är modellbaserad återanalys, inte stationsmätningar. Ingen prognos är ett löfte.
             </footer>
