@@ -193,12 +193,65 @@ function dayDate(iso) {
 
 function fineScore(d) {
   if (!d || d.tmax == null) return -999;
-  const sunH = (d.sun ?? 0) / 3600;
   const precip = d.precip ?? 0;
   const wind = d.wind ?? 0;
   const t = d.tmax;
-  const tempScore = t >= 18 && t <= 26 ? 10 : 10 - Math.min(10, Math.abs(t - 22) * 0.6);
-  return sunH * 1.2 + tempScore - precip * 1.5 - wind * 0.25;
+  // temperatur: topp runt 22°, men platta inte ut helt i 18–26 — varmare vinner vid lika väder
+  const tempScore = 10 - Math.min(10, Math.abs(t - 22) * 0.5) + Math.max(0, Math.min(t, 24) - 16) * 0.15;
+  // sol räknas bara med om värdet finns; annars luta på molntäcke/väderkod
+  const sunH = d.sun != null ? d.sun / 3600 : null;
+  const sunScore = sunH != null ? sunH * 1.0
+    : d.cloud != null ? (100 - d.cloud) / 100 * 6
+    : clearBonusFromCode(d.code);
+  return sunScore + tempScore - precip * 1.5 - wind * 0.25;
+}
+
+// grovt solvärde när varken soltimmar eller molntäcke finns, utifrån väderkod
+function clearBonusFromCode(code) {
+  if (code == null) return 3;
+  if (code === 0) return 6;      // klart
+  if (code === 1) return 5;      // mest klart
+  if (code === 2) return 3;      // halvklart
+  if (code === 3) return 1;      // mulet
+  return 0;                       // nederbörd
+}
+
+// ---------- bästa fönstret: hitta dagens finaste lucka ur timdatan ----------
+// Poängsätter varje timme (regnchans väger tyngst) och letar bästa
+// sammanhängande 3-timmarsfönstret med glidande fönster.
+function findBestWindow(h, fromIdx, toIdx, winLen = 3) {
+  if (!h?.time || toIdx - fromIdx + 1 < winLen) return null;
+  const score = (i) => {
+    const prob = h.precipitation_probability?.[i] ?? 0;
+    const mm = h.precipitation?.[i] ?? 0;
+    const wind = (h.wind_speed_10m?.[i] ?? 0) / 3.6;
+    const t = h.temperature_2m?.[i];
+    const code = h.weather_code?.[i];
+    let s = 10 - prob * 0.08 - mm * 2 - Math.max(0, wind - 3) * 0.4;
+    if (t != null) s -= Math.abs(t - 18) * 0.12;
+    if (code === 0) s += 1.5; else if (code === 1) s += 1; else if (code === 2) s += 0.4;
+    return s;
+  };
+  let best = null;
+  for (let a = fromIdx; a + winLen - 1 <= toIdx; a++) {
+    let sum = 0, maxProb = 0, totMm = 0;
+    for (let k = a; k < a + winLen; k++) {
+      sum += score(k);
+      maxProb = Math.max(maxProb, h.precipitation_probability?.[k] ?? 0);
+      totMm += h.precipitation?.[k] ?? 0;
+    }
+    if (!best || sum > best.sum) best = { start: a, end: a + winLen - 1, sum, maxProb, totMm };
+  }
+  if (!best) return null;
+  const h1 = new Date(h.time[best.start]).getHours();
+  const h2 = (new Date(h.time[best.end]).getHours() + 1) % 24;
+  const temps = [];
+  for (let k = best.start; k <= best.end; k++) {
+    if (h.temperature_2m?.[k] != null) temps.push(h.temperature_2m[k]);
+  }
+  const avgT = temps.length ? temps.reduce((x, y) => x + y, 0) / temps.length : null;
+  const dry = best.maxProb < 30 && best.totMm < 0.3;
+  return { h1, h2, avgT, dry, maxProb: best.maxProb };
 }
 
 // ---------- humörläge: kommentarsrad efter väder × läge ----------
@@ -263,12 +316,12 @@ function moodLine(mood, code, tmax, dateStr) {
 }
 
 const SOURCES = [
-  { key: "consensus", label: "Konsensus" },
-  { key: "smhi", label: "SMHI" },
-  { key: "metno_seamless", label: "Yr" },
-  { key: "ecmwf_ifs025", label: "ECMWF" },
-  { key: "gfs_seamless", label: "GFS" },
-  { key: "icon_seamless", label: "ICON" },
+  { key: "consensus", label: "Konsensus", full: "snittet av alla källor" },
+  { key: "smhi", label: "SMHI", full: "Sveriges meteorologiska och hydrologiska institut" },
+  { key: "metno_seamless", label: "Yr", full: "Meteorologisk institutt, Norge (yr.no)" },
+  { key: "ecmwf_ifs025", label: "ECMWF", full: "European Centre for Medium-Range Weather Forecasts" },
+  { key: "gfs_seamless", label: "GFS", full: "Global Forecast System, amerikanska NOAA" },
+  { key: "icon_seamless", label: "ICON", full: "ICON-modellen, tyska vädertjänsten DWD" },
 ];
 
 function agreementForDay(perModel, ens) {
@@ -1269,6 +1322,45 @@ export default function VaderApp() {
     return idx;
   }, [nearDays, source, isConsensus, optimist]);
 
+  // bästa fönstret idag (eller imorgon om dagen nästan är slut)
+  const bestWindow = useMemo(() => {
+    const h = std?.hourly;
+    if (!h?.time?.length) return null;
+    const now = new Date();
+    let startIdx = h.time.findIndex((t) => new Date(t) > now);
+    if (startIdx === -1) return null;
+    const todayStr = h.time[startIdx].slice(0, 10);
+    // dagens kvarvarande timmar fram till kl 22
+    let endIdx = startIdx;
+    while (
+      endIdx + 1 < h.time.length &&
+      h.time[endIdx + 1].slice(0, 10) === todayStr &&
+      new Date(h.time[endIdx + 1]).getHours() <= 22
+    ) endIdx++;
+    if (endIdx - startIdx + 1 >= 3) {
+      const w = findBestWindow(h, startIdx, endIdx);
+      if (w) return { ...w, day: "idag" };
+    }
+    // för sent idag — leta i morgondagens 07–21
+    let i = startIdx;
+    while (i < h.time.length && h.time[i].slice(0, 10) === todayStr) i++;
+    if (i >= h.time.length) return null;
+    const tomStr = h.time[i].slice(0, 10);
+    let a = i;
+    while (a < h.time.length && (h.time[a].slice(0, 10) !== tomStr || new Date(h.time[a]).getHours() < 7)) a++;
+    let b = a;
+    while (
+      b + 1 < h.time.length &&
+      h.time[b + 1].slice(0, 10) === tomStr &&
+      new Date(h.time[b + 1]).getHours() <= 21
+    ) b++;
+    if (b - a + 1 >= 3) {
+      const w = findBestWindow(h, a, b);
+      if (w) return { ...w, day: "imorgon" };
+    }
+    return null;
+  }, [std]);
+
   const auroraNights = useMemo(() => {
     if (!kp || !std?.hourly) return [];
     const nights = [];
@@ -1661,6 +1753,27 @@ export default function VaderApp() {
                     {moodLine("normal", cur.weather_code, cur.temperature_2m, heroDay?.date)}
                   </div>
 
+                  {/* bästa fönstret — dagens finaste lucka, uträknad ur timdatan */}
+                  {bestWindow && (
+                    <button
+                      onClick={() => document.getElementById("timstrip")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      title="Visa timme för timme"
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 7, marginTop: 12,
+                        padding: "8px 14px", borderRadius: 999, border: "none", cursor: "pointer",
+                        ...font, fontSize: 13, fontWeight: 600, color: heroInk,
+                        background: T.dark ? "rgba(255,255,255,0.16)" : "rgba(22,35,58,0.08)",
+                      }}>
+                      <span style={{ fontSize: 15 }}>{bestWindow.dry ? "☀️" : "🌦️"}</span>
+                      {bestWindow.dry
+                        ? `Bästa fönstret ${bestWindow.day}: ${bestWindow.h1}–${bestWindow.h2}`
+                        : `Minst blött ${bestWindow.day}: ${bestWindow.h1}–${bestWindow.h2}`}
+                      {bestWindow.avgT != null && (
+                        <span style={{ color: heroMuted, fontWeight: 500 }}>· {fmt0(bestWindow.avgT)}°</span>
+                      )}
+                    </button>
+                  )}
+
                   {/* nivå 2: mätarrutor */}
                   <div style={{
                     display: "grid",
@@ -1826,7 +1939,7 @@ export default function VaderApp() {
                   ? "Optimistläget visar den gladaste modellen per dag. Stäng av det för att välja källa själv."
                   : isConsensus
                     ? "Visar snittet av alla källor. Välj en modell för att se dagen genom just den."
-                    : `Visar prognosen enligt ${SOURCES.find((s) => s.key === source)?.label}. Nuläget står kvar som mätt.`}
+                    : `Visar prognosen enligt ${SOURCES.find((s) => s.key === source)?.label} — ${SOURCES.find((s) => s.key === source)?.full}.`}
               </p>
             </div>
 
