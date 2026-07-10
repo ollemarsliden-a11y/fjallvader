@@ -514,6 +514,28 @@ async function fetchEnsemble(lat, lon) {
 
 // Normaler: samma datum senaste 10 åren (ERA5-återanalys), cachas 30 dagar.
 // Sparar både snittet och varje enskilt år så man kan fälla ut år-för-år.
+// Slå upp vädret för ett specifikt historiskt datum (ERA5-arkivet, från 1940).
+async function fetchHistoricalDay(lat, lon, dateStr) {
+  const url =
+    `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}` +
+    `&start_date=${dateStr}&end_date=${dateStr}` +
+    `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,snowfall_sum,wind_speed_10m_max,weather_code&timezone=auto`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("archive_error");
+  const j = await r.json();
+  const d = j.daily;
+  if (!d?.time?.length || d.temperature_2m_max?.[0] == null) throw new Error("no_data");
+  return {
+    date: d.time[0],
+    tmax: d.temperature_2m_max[0],
+    tmin: d.temperature_2m_min[0],
+    precip: d.precipitation_sum?.[0],
+    snow: d.snowfall_sum?.[0],
+    wind: d.wind_speed_10m_max?.[0],
+    code: d.weather_code?.[0],
+  };
+}
+
 async function fetchNormals(lat, lon) {
   const key = `fjallvader_normals_v2_${lat.toFixed(1)}_${lon.toFixed(1)}`;
   try {
@@ -830,7 +852,7 @@ function Particles({ kind, wind = 0, reduce }) {
 
 // ---------- animerad väderscen i nulägeskortet ----------
 // Vindstyrd: partiklar driver i vindens riktning, lutning/fart efter styrka.
-function WeatherScene({ code, isDay, windDir, windKmh, reduce }) {
+function WeatherScene({ code, isDay, windDir, windKmh, reduce, full }) {
   const kind = weatherKind(code, null);
   const isSnow = kind === "snow";
   const isRain = ["rain", "thunder"].includes(kind);
@@ -843,34 +865,40 @@ function WeatherScene({ code, isDay, windDir, windKmh, reduce }) {
   const speedFactor = clamp(1 - (windKmh ?? 0) / 120, 0.45, 1);
 
   const particles = useMemo(() => {
-    const n = isSnow ? 34 : isRain ? 54 : 0;
+    const n = isSnow ? (full ? 46 : 34) : isRain ? (full ? 70 : 54) : 0;
     return Array.from({ length: n }, (_, i) => ({
       left: Math.random() * 110 - 5,
       delay: Math.random() * 4,
       dur: (isSnow ? 5.5 + Math.random() * 5 : 1.0 + Math.random() * 0.7) * speedFactor,
       size: isSnow ? 3 + Math.random() * 4 : 9 + Math.random() * 12,
-      op: 0.3 + Math.random() * 0.4,
+      op: (full ? 0.35 : 0.3) + Math.random() * (full ? 0.35 : 0.4),
       key: i,
     }));
-  }, [isSnow, isRain, speedFactor]);
+  }, [isSnow, isRain, speedFactor, full]);
 
-  const clouds = useMemo(() => (isCloud ? Array.from({ length: 3 }, (_, i) => ({
-    top: 12 + i * 22, scale: 0.7 + Math.random() * 0.5,
-    dur: 40 + Math.random() * 30, delay: -Math.random() * 40, op: 0.5 - i * 0.1, key: i,
-  })) : []), [isCloud]);
+  // mjuka dis-moln: stora och suddiga men TYDLIGT synliga mot himlen
+  const clouds = useMemo(() => (isCloud ? Array.from({ length: full ? 6 : 3 }, (_, i) => ({
+    top: 2 + i * (full ? 11 : 20) + Math.random() * 5,
+    w: (full ? 380 : 220) + Math.random() * 220,
+    h: (full ? 110 : 60) + Math.random() * 50,
+    dur: 38 + Math.random() * 32, delay: -Math.random() * 60,
+    op: (full ? 0.68 : 0.5) - i * 0.06, key: i,
+  })) : []), [isCloud, full]);
 
   return (
-    <div aria-hidden="true" style={{
+    <div aria-hidden="true" style={full ? {
+      position: "fixed", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 0,
+    } : {
       position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", borderRadius: 20,
     }}>
       {isClear && isDay && (
         <div style={{
-          position: "absolute", top: "-30%", right: "-10%", width: "70%", height: "120%",
-          background: "radial-gradient(circle, rgba(255,214,120,0.5), transparent 65%)",
+          position: "absolute", top: "-30%", right: "-10%", width: "70%", height: full ? "70%" : "120%",
+          background: "radial-gradient(circle, rgba(255,214,120,0.55), transparent 65%)",
           animation: reduce ? "none" : "fv-glow 8s ease-in-out infinite alternate",
         }} />
       )}
-      {isClear && !isDay && [...Array(18)].map((_, i) => (
+      {isClear && !isDay && [...Array(full ? 30 : 18)].map((_, i) => (
         <span key={i} style={{
           position: "absolute", width: 2, height: 2, borderRadius: "50%", background: "#fff",
           top: `${Math.random() * 70}%`, left: `${Math.random() * 100}%`, opacity: 0.5 + Math.random() * 0.4,
@@ -879,11 +907,10 @@ function WeatherScene({ code, isDay, windDir, windKmh, reduce }) {
       ))}
       {clouds.map((c) => (
         <div key={c.key} style={{
-          position: "absolute", top: `${c.top}%`, left: "-30%",
-          width: 120, height: 34, opacity: c.op,
-          transform: `scale(${c.scale})`,
-          background: "radial-gradient(50% 100% at 30% 60%, #fff 60%, transparent), radial-gradient(45% 100% at 60% 50%, #fff 60%, transparent), radial-gradient(40% 90% at 80% 65%, #fff 60%, transparent)",
-          filter: "blur(2px)",
+          position: "absolute", top: `${c.top}%`, left: "-40%",
+          width: c.w, height: c.h, opacity: c.op, borderRadius: "50%",
+          background: "radial-gradient(ellipse 55% 55% at 35% 55%, rgba(255,255,255,0.9), transparent 72%), radial-gradient(ellipse 50% 60% at 62% 45%, rgba(255,255,255,0.8), transparent 70%), radial-gradient(ellipse 42% 50% at 82% 60%, rgba(255,255,255,0.7), transparent 68%)",
+          filter: `blur(${full ? 10 : 8}px)`,
           animation: reduce ? "none" : `fv-drift ${c.dur}s linear ${c.delay}s infinite`,
         }} />
       ))}
@@ -894,14 +921,14 @@ function WeatherScene({ code, isDay, windDir, windKmh, reduce }) {
               position: "absolute", top: "-6%", left: `${p.left}%`,
               width: p.size, height: p.size, borderRadius: "50%",
               background: "rgba(255,255,255,0.9)", opacity: p.op,
-              animation: reduce ? "none" : `fv-scene-snow ${p.dur}s linear ${p.delay}s infinite`,
+              animation: reduce ? "none" : `${full ? "fv-snow" : "fv-scene-snow"} ${full ? p.dur * 2 : p.dur}s linear ${p.delay}s infinite`,
             }} />
           ) : (
             <span key={p.key} style={{
               position: "absolute", top: "-6%", left: `${p.left}%`,
-              width: 1.6, height: p.size, borderRadius: 2,
-              background: "rgba(210,228,245,0.7)", opacity: p.op,
-              animation: reduce ? "none" : `fv-scene-fall ${p.dur}s linear ${p.delay}s infinite`,
+              width: full ? 2 : 1.6, height: p.size, borderRadius: 2,
+              background: "rgba(180,205,228,0.65)", opacity: p.op,
+              animation: reduce ? "none" : `${full ? "fv-fall" : "fv-scene-fall"} ${full ? p.dur * 1.8 : p.dur}s linear ${p.delay}s infinite`,
             }} />
           ))}
         </div>
@@ -1219,7 +1246,10 @@ export default function VaderApp() {
     try { localStorage.setItem("vaderlek_optimist", v ? "1" : "0"); } catch { /* fullt */ }
   }
   const [openDay, setOpenDay] = useState(null);
-  const [showYears, setShowYears] = useState(false);
+  const [histDate, setHistDate] = useState("");
+  const [histResult, setHistResult] = useState(null);
+  const [histLoading, setHistLoading] = useState(false);
+  const [histErr, setHistErr] = useState(null);
   const [sunHistory, setSunHistory] = useState(null);
   const [sunMonth, setSunMonth] = useState(new Date().getMonth());
   const [warnings, setWarnings] = useState([]);
@@ -1502,21 +1532,20 @@ export default function VaderApp() {
   const heroDay = days[0];
 
   const ink = "#16233A", muted = "#5B7089", line = "#DCE5EC";
-  // nulägeskortets textfärger följer vädertemat (mörk text på ljusa teman, ljus på mörka)
-  const heroInk = T.pageInk;
-  const heroMuted = T.pageMuted;
-  // rutornas bakgrund i hjärtat: ljus på mörka teman, mörk på ljusa
-  const heroTile = T.dark ? "rgba(255,255,255,0.12)" : "rgba(22,35,58,0.06)";
+  // nulägeskortet är ett vanligt ljust kort — vädret bor i sidbakgrunden
+  const heroInk = ink;
+  const heroMuted = muted;
+  const heroTile = "rgba(22,35,58,0.05)";
   const font = { fontFamily: "'Inter', system-ui, sans-serif" };
   const display = { fontFamily: "'Space Grotesk', 'Inter', sans-serif" };
   const card = {
-    background: "rgba(255,255,255,0.88)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
+    background: "rgba(255,255,255,0.62)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
     borderRadius: 20, padding: "20px 22px", color: ink,
-    border: "1px solid rgba(255,255,255,0.55)", boxShadow: "0 2px 12px rgba(16,27,49,0.10)",
+    border: "1px solid rgba(255,255,255,0.45)", boxShadow: "0 2px 12px rgba(16,27,49,0.08)",
   };
 
   return (
-    <div style={{ ...font, minHeight: "100vh", background: PAGE_BG, color: PAGE_INK, transition: "background .6s ease", position: "relative" }}>
+    <div style={{ ...font, minHeight: "100vh", background: T.bg, color: T.pageInk, transition: "background 1.2s ease", position: "relative" }}>
       <style>{`
         @keyframes fv-fall { from { transform: translateY(0); } to { transform: translateY(115vh); } }
         @keyframes fv-snow {
@@ -1546,13 +1575,20 @@ export default function VaderApp() {
       `}</style>
 
       <Fjall colors={T.fjall} />
+      {cur && (
+        <WeatherScene full
+          code={cur.weather_code} isDay={cur.is_day === 1}
+          windDir={cur.wind_direction_10m} windKmh={cur.wind_speed_10m}
+          reduce={reduceMotion}
+        />
+      )}
       {auroraTonight && <AuroraGlow reduce={reduceMotion} />}
 
       <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 16px 30vh", position: "relative", zIndex: 1 }}>
 
         {/* header */}
         <header style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 22, textAlign: "center" }}>
-          <div style={{ color: PAGE_INK, marginBottom: 4 }}>
+          <div style={{ color: T.pageInk, marginBottom: 4 }}>
             <LogoMark size={42} />
           </div>
           <h1 style={{
@@ -1561,7 +1597,7 @@ export default function VaderApp() {
           }}>
             Väderlek
           </h1>
-          <p style={{ margin: "3px 0 12px", fontSize: 13, color: PAGE_MUTED, letterSpacing: "0.01em" }}>
+          <p style={{ margin: "3px 0 12px", fontSize: 13, color: T.pageMuted, letterSpacing: "0.01em" }}>
             Fem prognoskällor. En sanning. Ungefär.
           </p>
           <button
@@ -1630,14 +1666,6 @@ export default function VaderApp() {
               </ul>
             )}
           </div>
-          <button onClick={() => setShowMap(true)} style={{
-            display: "inline-flex", alignItems: "center", gap: 7, marginTop: 12,
-            padding: "8px 18px", borderRadius: 999, cursor: "pointer", ...font,
-            fontSize: 13, fontWeight: 600, color: "#3C5D7A",
-            border: `1px solid ${line}`, background: "rgba(255,255,255,0.7)",
-          }}>
-            <IconMap size={16} color="#3C5D7A" /> Regnradar
-          </button>
         </header>
 
         {showMap && (
@@ -1661,7 +1689,7 @@ export default function VaderApp() {
                   padding: "6px 14px", borderRadius: 999, fontSize: 13, cursor: "pointer", ...font,
                   border: active ? "1px solid transparent" : "1px solid rgba(255,255,255,0.5)",
                   background: active ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.35)",
-                  color: active ? ink : PAGE_INK, fontWeight: active ? 600 : 400,
+                  color: active ? ink : T.pageInk, fontWeight: active ? 600 : 400,
                 }}>
                   {f.name}
                 </button>
@@ -1702,28 +1730,8 @@ export default function VaderApp() {
           </div>
         ) : days.length > 0 && (
           <>
-            {/* hero — kortet ÄR vädret: temats bakgrund + textväxling */}
-            <section style={{
-              borderRadius: 20, padding: "20px 22px", marginBottom: 16,
-              position: "relative", overflow: "hidden",
-              background: T.bg,
-              boxShadow: "0 2px 12px rgba(16,27,49,0.14)",
-              border: T.dark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(255,255,255,0.4)",
-            }}>
-              {cur && (
-                <WeatherScene
-                  code={cur.weather_code} isDay={cur.is_day === 1}
-                  windDir={cur.wind_direction_10m} windKmh={cur.wind_speed_10m}
-                  reduce={reduceMotion}
-                />
-              )}
-              {/* scrim: ger djup + läsbarhet, och skiljer kortet från sidan bakom */}
-              <div aria-hidden="true" style={{
-                position: "absolute", inset: 0, borderRadius: 20, pointerEvents: "none",
-                background: T.dark
-                  ? "linear-gradient(160deg, rgba(255,255,255,0.14) 0%, rgba(10,18,30,0.30) 100%)"
-                  : "linear-gradient(160deg, rgba(255,255,255,0.45) 0%, rgba(22,40,64,0.06) 55%, rgba(22,40,64,0.14) 100%)",
-              }} />
+            {/* hero — vanligt ljust kort; vädret bor i sidbakgrunden (Yr-stil) */}
+            <section style={{ ...card, marginBottom: 16, position: "relative" }}>
               <div style={{ position: "relative", zIndex: 1 }}>
               {/* nivå 1: plats + nuläge */}
               <div style={{ fontSize: 13, color: heroMuted, marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
@@ -1762,7 +1770,7 @@ export default function VaderApp() {
                         display: "inline-flex", alignItems: "center", gap: 7, marginTop: 12,
                         padding: "8px 14px", borderRadius: 999, border: "none", cursor: "pointer",
                         ...font, fontSize: 13, fontWeight: 600, color: heroInk,
-                        background: T.dark ? "rgba(255,255,255,0.16)" : "rgba(22,35,58,0.08)",
+                        background: "rgba(22,35,58,0.08)",
                       }}>
                       <span style={{ fontSize: 15 }}>{bestWindow.dry ? "☀️" : "🌦️"}</span>
                       {bestWindow.dry
@@ -1794,7 +1802,7 @@ export default function VaderApp() {
                         <div style={{ ...display, fontSize: 16, fontWeight: 700 }}>
                           {dayLight.hours} t {dayLight.mins} min
                           {dayLight.delta != null && dayLight.delta !== 0 && (
-                            <span style={{ fontSize: 12, fontWeight: 600, marginLeft: 5, color: T.dark ? (dayLight.delta > 0 ? "#8FE0B4" : "#9CC2F0") : (dayLight.delta > 0 ? "#3E8E63" : "#2D6FB4") }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, marginLeft: 5, color: dayLight.delta > 0 ? "#3E8E63" : "#2D6FB4" }}>
                               {dayLight.delta > 0 ? "+" : ""}{dayLight.delta}
                             </span>
                           )}
@@ -1804,8 +1812,8 @@ export default function VaderApp() {
                     )}
                     {todayDelta != null && (
                       <button
-                        onClick={() => setShowYears(!showYears)}
-                        aria-expanded={showYears}
+                        onClick={() => document.getElementById("historik")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                        title="Visa väderhistorik"
                         style={{
                           background: heroTile, borderRadius: 12, padding: "9px 12px",
                           border: "none", cursor: "pointer", textAlign: "left", ...font, color: heroInk,
@@ -1813,13 +1821,10 @@ export default function VaderApp() {
                         <div style={{ fontSize: 10, color: heroMuted, textTransform: "uppercase", letterSpacing: "0.07em" }}>Mot normalt</div>
                         <div style={{
                           ...display, fontSize: 16, fontWeight: 700,
-                          color: Math.abs(todayDelta) < 0.5 ? heroInk : T.dark ? (todayDelta > 0 ? "#F0B48C" : "#9CC2F0") : (todayDelta > 0 ? "#B4552D" : "#2D6FB4"),
+                          color: Math.abs(todayDelta) < 0.5 ? heroInk : todayDelta > 0 ? "#B4552D" : "#2D6FB4",
                         }}>
                           {todayDelta > 0 ? "+" : ""}{fmt1(todayDelta)}°
-                          <span style={{
-                            fontSize: 11, color: heroMuted, marginLeft: 5, display: "inline-block",
-                            transform: showYears ? "rotate(180deg)" : "none", transition: "transform .2s",
-                          }}>▾</span>
+                          <span style={{ fontSize: 11, color: heroMuted, marginLeft: 5 }}>▾</span>
                         </div>
                         <div style={{ fontSize: 11, color: heroMuted }}>år för år</div>
                       </button>
@@ -1831,52 +1836,6 @@ export default function VaderApp() {
                       </div>
                     )}
                   </div>
-
-                  {/* utfällning: år för år */}
-                  {showYears && todayNormal?.years?.length > 0 && (
-                    <div style={{ marginTop: 12, borderTop: `1px solid ${line}`, paddingTop: 10 }}>
-                      <div style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                        Den {dayDate(days[0].date)}, år för år · snitt senaste 10 åren
-                      </div>
-                      {(() => {
-                        const yrs = todayNormal.years;
-                        const highs = yrs.map((y) => y.tmax);
-                        const warmest = Math.max(...highs), coldest = Math.min(...highs);
-                        const warmYear = yrs.find((y) => y.tmax === warmest);
-                        const coldYear = yrs.find((y) => y.tmax === coldest);
-                        return (
-                          <>
-                            <div style={{ fontSize: 12, marginBottom: 8 }}>
-                              <span style={{ color: "#B4552D", fontWeight: 600 }}>Rekord att slå: {fmt1(warmest)}° ({warmYear.year})</span>
-                              <span style={{ color: muted }}> · kallast: {fmt1(coldest)}° ({coldYear.year})</span>
-                            </div>
-                            {yrs.map((y) => {
-                              const isWarm = y.tmax === warmest, isCold = y.tmax === coldest;
-                              const pct = clamp(((y.tmax - coldest) / (warmest - coldest || 1)) * 100, 0, 100);
-                              return (
-                                <div key={y.year} style={{ display: "flex", alignItems: "center", gap: 10, padding: "3px 0", fontSize: 13 }}>
-                                  <span style={{ width: 34, color: muted, fontVariantNumeric: "tabular-nums" }}>{y.year}</span>
-                                  <div style={{ flex: 1, height: 6, background: line, borderRadius: 3, overflow: "hidden" }}>
-                                    <div style={{
-                                      height: "100%", width: `${pct}%`, borderRadius: 3,
-                                      background: isWarm ? "#B4552D" : isCold ? "#2D6FB4" : "#8FA3B8",
-                                    }} />
-                                  </div>
-                                  <span style={{ ...display, width: 44, textAlign: "right", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
-                                    {fmt1(y.tmax)}°
-                                  </span>
-                                  <span style={{ width: 16, fontSize: 12 }}>{isWarm ? "🔥" : isCold ? "❄️" : ""}</span>
-                                </div>
-                              );
-                            })}
-                          </>
-                        );
-                      })()}
-                      <div style={{ fontSize: 11, color: muted, marginTop: 8 }}>
-                        Dagens maxtemp: {fmt1(days[0].consensus.tmax)}°. Staplarna visar dagstemperaturen samma datum varje år.
-                      </div>
-                    </div>
-                  )}
 
                   {/* nivå 3: statusrad + timgenväg */}
                   <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 13, flexWrap: "wrap" }}>
@@ -1893,7 +1852,7 @@ export default function VaderApp() {
                       onClick={() => document.getElementById("timstrip")?.scrollIntoView({ behavior: "smooth", block: "start" })}
                       style={{
                         border: "none", background: "transparent", cursor: "pointer", padding: 0,
-                        fontSize: 13, color: T.dark ? "#9CC2F0" : "#2D6FB4", fontWeight: 600, ...font,
+                        fontSize: 13, color: "#2D6FB4", fontWeight: 600, ...font,
                       }}>
                       Timme för timme ▾
                     </button>
@@ -1902,6 +1861,19 @@ export default function VaderApp() {
               ) : null}
               </div>
             </section>
+
+            {/* regnradar — under dagens väder */}
+            <div style={{ textAlign: "center", marginBottom: 16 }}>
+              <button onClick={() => setShowMap(true)} style={{
+                display: "inline-flex", alignItems: "center", gap: 7,
+                padding: "9px 20px", borderRadius: 999, cursor: "pointer", ...font,
+                fontSize: 13, fontWeight: 600, color: "#3C5D7A",
+                border: "1px solid rgba(255,255,255,0.6)", background: "rgba(255,255,255,0.75)",
+                boxShadow: "0 1px 6px rgba(16,27,49,0.08)",
+              }}>
+                <IconMap size={16} color="#3C5D7A" /> Regnradar
+              </button>
+            </div>
 
             {/* modellväljare — styr prognosen nedan */}
             <div style={{ marginBottom: 16 }}>
@@ -1934,7 +1906,7 @@ export default function VaderApp() {
                 })}
               </div>
               </div>
-              <p style={{ fontSize: 11, color: PAGE_MUTED, margin: "6px 2px 0", textAlign: "center" }}>
+              <p style={{ fontSize: 11, color: T.pageMuted, margin: "6px 2px 0", textAlign: "center" }}>
                 {optimist
                   ? "Optimistläget visar den gladaste modellen per dag. Stäng av det för att välja källa själv."
                   : isConsensus
@@ -1942,27 +1914,6 @@ export default function VaderApp() {
                     : `Visar prognosen enligt ${SOURCES.find((s) => s.key === source)?.label} — ${SOURCES.find((s) => s.key === source)?.full}.`}
               </p>
             </div>
-
-            {/* band 16 dagar */}
-            <section style={{ ...card, marginBottom: 16 }}>
-              <div style={{ marginBottom: 8 }}>
-                <h2 style={{ ...display, fontSize: 16, fontWeight: 700, margin: 0 }}>
-                  {optimist
-                    ? "16 dagar enligt de gladaste källorna"
-                    : isConsensus
-                      ? "16 dagar enligt alla källor"
-                      : `16 dagar enligt ${SOURCES.find((s) => s.key === source)?.label}`}
-                </h2>
-              </div>
-              <BandChart days={days} ink={ink} muted={muted} source={source} optimist={optimist} />
-              <p style={{ fontSize: 11, color: muted, margin: "6px 0 0", textAlign: "center" }}>
-                {optimist
-                  ? "optimistens linje följer bandets överkant"
-                  : isConsensus
-                    ? "bandet visar källornas och ensemblens spridning"
-                    : `linjen visar ${SOURCES.find((s) => s.key === source)?.label}, bandet övriga källors spridning`}
-              </p>
-            </section>
 
             {/* timme för timme — egen sektion */}
             {std?.hourly && (
@@ -2101,6 +2052,121 @@ export default function VaderApp() {
                 </p>
               </section>
             )}
+
+            {/* väderhistorik — egen framträdande sektion */}
+            <section id="historik" style={{ ...card, marginBottom: 16, scrollMarginTop: 12 }}>
+              <h2 style={{ ...display, fontSize: 16, fontWeight: 700, margin: "0 0 2px" }}>Väderhistorik</h2>
+              <p style={{ fontSize: 12, color: muted, margin: "0 0 12px" }}>
+                Så har vädret varit här — och slå upp vilken dag som helst sedan 1940.
+              </p>
+
+              {todayDelta != null && (
+                <p style={{ fontSize: 13, margin: "0 0 10px" }}>
+                  Idag är det <strong style={{ color: todayDelta > 0 ? "#B4552D" : "#2D6FB4" }}>
+                  {Math.abs(todayDelta) < 0.5 ? "ungefär som normalt" : `${fmt1(Math.abs(todayDelta))}° ${todayDelta > 0 ? "varmare" : "kallare"} än normalt`}
+                  </strong> för den {dayDate(days[0].date)}.
+                </p>
+              )}
+
+              {todayNormal?.years?.length > 0 && (() => {
+                const yrs = todayNormal.years;
+                const highs = yrs.map((y) => y.tmax);
+                const warmest = Math.max(...highs), coldest = Math.min(...highs);
+                const warmYear = yrs.find((y) => y.tmax === warmest);
+                const coldYear = yrs.find((y) => y.tmax === coldest);
+                return (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                      Den {dayDate(days[0].date)} de senaste 10 åren
+                    </div>
+                    <div style={{ fontSize: 12, marginBottom: 8 }}>
+                      <span style={{ color: "#B4552D", fontWeight: 600 }}>Varmast: {fmt1(warmest)}° ({warmYear.year})</span>
+                      <span style={{ color: muted }}> · kallast: {fmt1(coldest)}° ({coldYear.year})</span>
+                    </div>
+                    {yrs.map((y) => {
+                      const isWarm = y.tmax === warmest, isCold = y.tmax === coldest;
+                      const pct = clamp(((y.tmax - coldest) / (warmest - coldest || 1)) * 100, 0, 100);
+                      return (
+                        <div key={y.year} style={{ display: "flex", alignItems: "center", gap: 10, padding: "3px 0", fontSize: 13 }}>
+                          <span style={{ width: 34, color: muted, fontVariantNumeric: "tabular-nums" }}>{y.year}</span>
+                          <div style={{ flex: 1, height: 6, background: line, borderRadius: 3, overflow: "hidden" }}>
+                            <div style={{
+                              height: "100%", width: `${pct}%`, borderRadius: 3,
+                              background: isWarm ? "#B4552D" : isCold ? "#2D6FB4" : "#8FA3B8",
+                            }} />
+                          </div>
+                          <span style={{ ...display, width: 44, textAlign: "right", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                            {fmt1(y.tmax)}°
+                          </span>
+                          <span style={{ width: 16, fontSize: 12 }}>{isWarm ? "🔥" : isCold ? "❄️" : ""}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* slå upp ett specifikt datum, ända tillbaka till 1940 */}
+              <div style={{ borderTop: `1px solid ${line}`, paddingTop: 12 }}>
+                <div style={{ fontSize: 11, color: muted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                  Slå upp ett datum
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <input
+                    type="date" value={histDate}
+                    min="1940-01-01"
+                    max={new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10)}
+                    onChange={(e) => setHistDate(e.target.value)}
+                    style={{
+                      padding: "9px 12px", borderRadius: 10, border: `1px solid ${line}`,
+                      ...font, fontSize: 14, color: ink, background: "#fff",
+                    }} />
+                  <button
+                    onClick={async () => {
+                      if (!histDate) return;
+                      setHistLoading(true); setHistErr(null); setHistResult(null);
+                      try {
+                        const res = await fetchHistoricalDay(place.lat, place.lon, histDate);
+                        setHistResult(res);
+                      } catch {
+                        setHistErr("Kunde inte hämta det datumet — prova ett annat.");
+                      }
+                      setHistLoading(false);
+                    }}
+                    disabled={!histDate || histLoading}
+                    style={{
+                      padding: "9px 18px", borderRadius: 10, border: "none",
+                      cursor: histDate && !histLoading ? "pointer" : "default", ...font, fontSize: 14, fontWeight: 600,
+                      background: histDate && !histLoading ? "#16233A" : line, color: histDate && !histLoading ? "#fff" : muted,
+                    }}>
+                    {histLoading ? "Hämtar …" : "Slå upp"}
+                  </button>
+                </div>
+                {histErr && <p style={{ fontSize: 13, color: "#B4552D", margin: "10px 0 0" }}>{histErr}</p>}
+                {histResult && (
+                  <div style={{
+                    marginTop: 12, padding: "12px 14px", borderRadius: 12,
+                    background: "rgba(22,35,58,0.04)", fontSize: 14,
+                  }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                      {new Date(histResult.date + "T12:00:00").toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 20 }}>{wmoIcon(histResult.code)}</span>
+                      <span style={{ ...display, fontWeight: 700 }}>{fmt0(histResult.tmax)}° / {fmt0(histResult.tmin)}°</span>
+                      <span style={{ color: muted }}>
+                        {histResult.precip != null && histResult.precip >= 0.1 ? `${fmt1(histResult.precip)} mm nederbörd` : "uppehåll"}
+                        {histResult.snow != null && histResult.snow >= 0.5 ? ` · ${fmt0(histResult.snow)} cm snö` : ""}
+                        {histResult.wind != null ? ` · vind upp till ${fmt0(histResult.wind / 3.6)} m/s` : ""}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                <p style={{ fontSize: 11, color: muted, margin: "10px 0 0" }}>
+                  Historiska data från ERA5-arkivet — modellerade värden för exakt den här platsen, tillbaka till 1940.
+                </p>
+              </div>
+            </section>
 
             {/* norrsken + uv */}
             <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
@@ -2363,7 +2429,7 @@ export default function VaderApp() {
 
             {/* dolda kort som chips */}
             {hiddenCards.length > 0 && (
-              <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: PAGE_MUTED }}>
+              <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: T.pageMuted }}>
                 <span>Dolda:</span>
                 {hiddenCards.map((k) => (
                   <button key={k} onClick={() => setCardPref(k, "shown")}
@@ -2371,7 +2437,7 @@ export default function VaderApp() {
                     style={{
                       padding: "5px 12px", borderRadius: 999, fontSize: 12, cursor: "pointer", ...font,
                       border: "1px solid rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.30)",
-                      color: PAGE_INK,
+                      color: T.pageInk,
                     }}>
                     {CARD_LABELS[k]} +
                   </button>
@@ -2379,7 +2445,7 @@ export default function VaderApp() {
               </div>
             )}
 
-            <footer style={{ marginTop: 20, fontSize: 11, color: PAGE_MUTED, textAlign: "center", position: "relative" }}>
+            <footer style={{ marginTop: 20, fontSize: 11, color: T.pageMuted, textAlign: "center", position: "relative" }}>
               Data: Open-Meteo (ECMWF · GFS · ICON · MET Norway + ensemble + ERA5-arkiv) · SMHI öppna data · NOAA SWPC.
               Normaler är modellbaserad återanalys, inte stationsmätningar. Ingen prognos är ett löfte.
             </footer>
