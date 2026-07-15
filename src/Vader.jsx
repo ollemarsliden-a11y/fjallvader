@@ -3,6 +3,8 @@ const MapView = lazy(() => import("./MapView.jsx"));
 
 /*
   VÄDERLEK — flerkälls-väderapp
+  Källor för konsensus: SMHI, Yr (MET Norway) och ECMWF — tre modeller byggda för
+  skandinaviskt väder. GFS lever kvar enbart som ensemble (sannolikheter), inte som vald källa.
   Nytt i v2:
    • Bakgrund som anpassas efter aktuellt väder + tid på dygnet (gradient, fjällsiluett,
      regn/snö-partiklar, norrskensglöd vid hög chans)
@@ -16,10 +18,12 @@ const MapView = lazy(() => import("./MapView.jsx"));
 
 // ---------- konstanter ----------
 
+// Tre källor byggda för Skandinavien: SMHI + Yr (MET Norway) + ECMWF.
+// ECMWF är gold standard på medellång sikt i Europa och når längst (15 dygn),
+// så konsensus och "Längre fram" behåller modelltäckning bortom Yr:s tre dygn.
+// (GFS finns kvar enbart som ensemble-motor för sannolikheter, inte som vald källa.)
 const MODELS = [
   { key: "ecmwf_ifs025", name: "ECMWF", horizon: 15 },
-  { key: "gfs_seamless", name: "GFS", horizon: 16 },
-  { key: "icon_seamless", name: "ICON", horizon: 7 },
   { key: "metno_seamless", name: "Yr", horizon: 3 },
 ];
 const SMHI_KEY = "smhi";
@@ -320,9 +324,8 @@ const SOURCES = [
   { key: "smhi", label: "SMHI", full: "Sveriges meteorologiska och hydrologiska institut" },
   { key: "metno_seamless", label: "Yr", full: "Meteorologisk institutt, Norge (yr.no)" },
   { key: "ecmwf_ifs025", label: "ECMWF", full: "European Centre for Medium-Range Weather Forecasts" },
-  { key: "gfs_seamless", label: "GFS", full: "Global Forecast System, amerikanska NOAA" },
-  { key: "icon_seamless", label: "ICON", full: "ICON-modellen, tyska vädertjänsten DWD" },
 ];
+const SOURCE_KEYS = new Set(SOURCES.map((s) => s.key));
 
 function agreementForDay(perModel, ens) {
   const temps = Object.values(perModel).map((m) => m?.tmax).filter((v) => v != null);
@@ -891,14 +894,15 @@ function WeatherScene({ code, isDay, windDir, windKmh, reduce, full }) {
     } : {
       position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", borderRadius: 20,
     }}>
-      {isClear && isDay && (
+      {/* sol & stjärnor sköts av CelestialArc i helskärmsläget — behåll bara för ev. kortläge */}
+      {isClear && isDay && !full && (
         <div style={{
-          position: "absolute", top: "-30%", right: "-10%", width: "70%", height: full ? "70%" : "120%",
+          position: "absolute", top: "-30%", right: "-10%", width: "70%", height: "120%",
           background: "radial-gradient(circle, rgba(255,214,120,0.55), transparent 65%)",
           animation: reduce ? "none" : "fv-glow 8s ease-in-out infinite alternate",
         }} />
       )}
-      {isClear && !isDay && [...Array(full ? 30 : 18)].map((_, i) => (
+      {isClear && !isDay && !full && [...Array(18)].map((_, i) => (
         <span key={i} style={{
           position: "absolute", width: 2, height: 2, borderRadius: "50%", background: "#fff",
           top: `${Math.random() * 70}%`, left: `${Math.random() * 100}%`, opacity: 0.5 + Math.random() * 0.4,
@@ -943,14 +947,201 @@ function WeatherScene({ code, isDay, windDir, windKmh, reduce, full }) {
   );
 }
 
-function AuroraGlow({ reduce }) {
+// ---------- signaturhimmel: sol/måne på verklig båge + flödande norrsken ----------
+
+// var på himlen står himlakroppen just nu? f=0 vid uppgång, 1 vid nedgång.
+function celestialPos(isDay, sunrise, sunset, nextSunrise, now) {
+  const ms = (s) => (s ? new Date(s).getTime() : null);
+  const t = now.getTime();
+  let f = 0.5;
+  if (isDay) {
+    const sr = ms(sunrise), ss = ms(sunset);
+    if (sr != null && ss != null && ss > sr) f = clamp((t - sr) / (ss - sr), 0, 1);
+  } else {
+    const ss = ms(sunset), nr = ms(nextSunrise);
+    if (ss != null && nr != null && nr > ss) {
+      f = clamp((t - ss) / (nr - ss), 0, 1);
+    } else {
+      const h = now.getHours() + now.getMinutes() / 60;
+      f = clamp((h >= 18 ? h - 18 : h + 6) / 12, 0, 1); // grov 18→06-fallback
+    }
+  }
+  const elevation = Math.sin(Math.PI * f); // 0 vid horisont, 1 i zenit
+  return { f, elevation, xPct: 8 + f * 84, yPct: 82 - 66 * elevation };
+}
+
+// månens lysande del som SVG-terminator (rx krymper mot skäran, växer mot gibbous)
+function moonLitPath(r, illum, waxing) {
+  const k = clamp(illum / 100, 0, 1);
+  const rx = Math.abs(r * (1 - 2 * k));
+  const outerSweep = waxing ? 1 : 0;
+  const innerSweep = k < 0.5 ? (waxing ? 0 : 1) : (waxing ? 1 : 0);
+  return `M0,${-r} A ${r},${r} 0 0 ${outerSweep} 0,${r} A ${rx},${r} 0 0 ${innerSweep} 0,${-r} Z`;
+}
+
+// Solen/månen rör sig längs sin verkliga bana över dygnet; natthimlen får stjärnor.
+function CelestialArc({ isDay, sunrise, sunset, nextSunrise, moon, cloud, reduce }) {
+  const now = useMemo(() => new Date(), [sunrise, sunset, isDay]);
+  const pos = celestialPos(isDay, sunrise, sunset, nextSunrise, now);
+  const clr = clamp((cloud ?? 40) / 100, 0, 1);
+
+  // stjärnor: fler och klarare ju klarare himmel
+  const stars = useMemo(() => {
+    const n = Math.round(46 * (1 - clr * 0.7));
+    return Array.from({ length: n }, (_, i) => ({
+      x: Math.random() * 100, y: Math.random() * 58,
+      s: 1 + Math.random() * 1.8, op: 0.35 + Math.random() * 0.5,
+      dur: 2.4 + Math.random() * 3.6, delay: Math.random() * 4, key: i,
+    }));
+  }, [clr, isDay]);
+
+  // varm ton nära horisonten (gyllene timme), ljus och vit högt uppe
+  const golden = pos.elevation < 0.32;
+  const sunCore = golden ? "#FFCE7A" : "#FFF6D8";
+  const sunMid = golden ? "#FF9E4D" : "#FFD86B";
+
+  const bodyLeft = `${pos.xPct}%`;
+  const bodyTop = `${pos.yPct}%`;
+
   return (
     <div aria-hidden="true" style={{
-      position: "fixed", left: 0, right: 0, top: 0, height: "45vh", zIndex: 0, pointerEvents: "none",
-      background: "radial-gradient(70% 60% at 30% 0%, rgba(61,220,151,0.35), transparent 70%), radial-gradient(60% 55% at 75% 5%, rgba(124,92,255,0.28), transparent 70%)",
-      animation: reduce ? "none" : "fv-aurora 14s ease-in-out infinite alternate",
-      filter: "blur(6px)",
-    }} />
+      position: "fixed", left: 0, right: 0, top: 0, height: "62vh",
+      zIndex: 0, pointerEvents: "none", overflow: "hidden",
+    }}>
+      {/* svag bågspårslinje — visar himlakroppens bana */}
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
+        <path d={`M8,${82 - 66 * Math.sin(Math.PI * 0.02)} ${[...Array(21)].map((_, i) => {
+          const f = i / 20; return `L${8 + f * 84},${82 - 66 * Math.sin(Math.PI * f)}`;
+        }).join(" ")}`}
+          fill="none" stroke={isDay ? "rgba(255,255,255,0.28)" : "rgba(200,215,240,0.16)"}
+          strokeWidth="0.3" strokeDasharray="1.4 2.2" vectorEffect="non-scaling-stroke" />
+      </svg>
+
+      {/* stjärnor (natt) */}
+      {!isDay && stars.map((st) => (
+        <span key={st.key} style={{
+          position: "absolute", left: `${st.x}%`, top: `${st.y}%`,
+          width: st.s, height: st.s, borderRadius: "50%", background: "#fff",
+          opacity: st.op, boxShadow: "0 0 3px rgba(255,255,255,0.7)",
+          animation: reduce ? "none" : `fv-twinkle ${st.dur}s ease-in-out ${st.delay}s infinite`,
+        }} />
+      ))}
+
+      {/* himlakroppen */}
+      {isDay ? (
+        <div style={{ position: "absolute", left: bodyLeft, top: bodyTop, transform: "translate(-50%,-50%)" }}>
+          {/* roterande strålar */}
+          {!reduce && (
+            <div style={{
+              position: "absolute", left: "50%", top: "50%", width: 300, height: 300,
+              transform: "translate(-50%,-50%)",
+              background: `repeating-conic-gradient(from 0deg, ${golden ? "rgba(255,180,90,0.20)" : "rgba(255,225,150,0.18)"} 0deg 4deg, transparent 4deg 13deg)`,
+              WebkitMaskImage: "radial-gradient(circle, #000 18%, transparent 62%)",
+              maskImage: "radial-gradient(circle, #000 18%, transparent 62%)",
+              animation: "fv-spin 90s linear infinite", opacity: 0.9,
+            }} />
+          )}
+          {/* mjuk halo */}
+          <div style={{
+            position: "absolute", left: "50%", top: "50%", width: 260, height: 260,
+            transform: "translate(-50%,-50%)", borderRadius: "50%",
+            background: `radial-gradient(circle, ${sunMid}66 0%, transparent 66%)`,
+            animation: reduce ? "none" : "fv-glow 7s ease-in-out infinite alternate",
+          }} />
+          {/* solskiva */}
+          <div style={{
+            width: 104, height: 104, borderRadius: "50%",
+            background: `radial-gradient(circle at 38% 34%, ${sunCore}, ${sunMid} 62%, ${golden ? "#F0803A" : "#FFC24D"} 100%)`,
+            boxShadow: `0 0 60px 12px ${sunMid}88`,
+          }} />
+        </div>
+      ) : (
+        <div style={{ position: "absolute", left: bodyLeft, top: bodyTop, transform: "translate(-50%,-50%)" }}>
+          {/* månglöd */}
+          <div style={{
+            position: "absolute", left: "50%", top: "50%", width: 190, height: 190,
+            transform: "translate(-50%,-50%)", borderRadius: "50%",
+            background: "radial-gradient(circle, rgba(220,232,250,0.32) 0%, transparent 64%)",
+          }} />
+          <svg width="92" height="92" viewBox="-50 -50 100 100" style={{ display: "block", filter: "drop-shadow(0 0 8px rgba(210,224,248,0.35))" }}>
+            <defs>
+              <radialGradient id="fvMoonLit" cx="40%" cy="36%" r="72%">
+                <stop offset="0%" stopColor="#FDFEFF" />
+                <stop offset="70%" stopColor="#E4EAF6" />
+                <stop offset="100%" stopColor="#C4CFE2" />
+              </radialGradient>
+            </defs>
+            {/* mörka sidan syns svagt (jordsken) */}
+            <circle r="46" fill="#20304C" opacity="0.55" />
+            <path d={moonLitPath(46, moon.illum, moon.age < SYNODIC / 2)} fill="url(#fvMoonLit)" />
+            {/* diskreta hav */}
+            <circle cx="-12" cy="-8" r="6" fill="#B9C6DC" opacity="0.35" />
+            <circle cx="8" cy="10" r="8" fill="#B9C6DC" opacity="0.28" />
+            <circle cx="16" cy="-14" r="4" fill="#B9C6DC" opacity="0.30" />
+          </svg>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Flödande norrskensridåer — vajande, glödande SVG-kurvor som ersätter platt glow.
+function AuroraRibbons({ reduce }) {
+  const ribbons = [
+    { y: 120, sw: 128, dur: "17s", grad: "fvAur1", d: [
+      "M -60,120 C 160,50 320,190 520,110 S 860,40 1060,140",
+      "M -60,140 C 160,190 320,60 520,150 S 860,80 1060,100",
+      "M -60,110 C 160,80 320,170 520,90 S 860,150 1060,130",
+    ] },
+    { y: 170, sw: 96, dur: "23s", grad: "fvAur2", d: [
+      "M -60,190 C 200,110 360,230 560,150 S 880,90 1060,180",
+      "M -60,170 C 200,240 360,120 560,210 S 880,150 1060,140",
+      "M -60,200 C 200,140 360,220 560,130 S 880,200 1060,170",
+    ] },
+    { y: 90, sw: 70, dur: "13s", grad: "fvAur3", d: [
+      "M -60,80 C 180,40 340,130 540,70 S 900,20 1060,90",
+      "M -60,100 C 180,150 340,50 540,120 S 900,70 1060,60",
+      "M -60,70 C 180,60 340,120 540,50 S 900,110 1060,100",
+    ] },
+  ];
+  return (
+    <div aria-hidden="true" style={{
+      position: "fixed", left: 0, right: 0, top: 0, height: "52vh", zIndex: 0,
+      pointerEvents: "none", mixBlendMode: "screen",
+    }}>
+      <svg viewBox="0 0 1000 400" preserveAspectRatio="none" width="100%" height="100%"
+        style={{ filter: "blur(11px)" }}>
+        <defs>
+          <linearGradient id="fvAur1" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop offset="0%" stopColor="#7CFFC4" stopOpacity="0" />
+            <stop offset="30%" stopColor="#3DDC97" stopOpacity="0.55" />
+            <stop offset="70%" stopColor="#3E9BFF" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="#7C5CFF" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="fvAur2" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop offset="0%" stopColor="#B7FFD8" stopOpacity="0" />
+            <stop offset="40%" stopColor="#57E6A6" stopOpacity="0.45" />
+            <stop offset="100%" stopColor="#9C6BFF" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="fvAur3" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop offset="0%" stopColor="#D9C4FF" stopOpacity="0" />
+            <stop offset="45%" stopColor="#8F7BFF" stopOpacity="0.40" />
+            <stop offset="100%" stopColor="#3DDC97" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {ribbons.map((r, i) => (
+          <path key={i} d={r.d[0]} fill="none" stroke={`url(#${r.grad})`}
+            strokeWidth={r.sw} strokeLinecap="round">
+            {!reduce && (
+              <animate attributeName="d" values={`${r.d.join(";")};${r.d[0]}`}
+                dur={r.dur} repeatCount="indefinite" calcMode="spline"
+                keyTimes="0;0.33;0.66;1"
+                keySplines="0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1" />
+            )}
+          </path>
+        ))}
+      </svg>
+    </div>
   );
 }
 
@@ -1231,7 +1422,10 @@ export default function VaderApp() {
   const [normals, setNormals] = useState(null);
   const [kp, setKp] = useState(null);
   const [source, setSourceState] = useState(() => {
-    try { return localStorage.getItem("vaderlek_source") || "consensus"; } catch { return "consensus"; }
+    try {
+      const saved = localStorage.getItem("vaderlek_source");
+      return saved && SOURCE_KEYS.has(saved) ? saved : "consensus"; // GFS/ICON borttagna — fall tillbaka
+    } catch { return "consensus"; }
   });
   function setSource(s) {
     setSourceState(s);
@@ -1574,6 +1768,18 @@ export default function VaderApp() {
         }
       `}</style>
 
+      {auroraTonight && <AuroraRibbons reduce={reduceMotion} />}
+      {cur && (
+        <CelestialArc
+          isDay={cur.is_day === 1}
+          sunrise={std?.daily?.sunrise?.[todayIdx]}
+          sunset={std?.daily?.sunset?.[todayIdx]}
+          nextSunrise={std?.daily?.sunrise?.[todayIdx + 1]}
+          moon={moonPhase()}
+          cloud={cur.cloud_cover}
+          reduce={reduceMotion}
+        />
+      )}
       <Fjall colors={T.fjall} />
       {cur && (
         <WeatherScene full
@@ -1582,7 +1788,6 @@ export default function VaderApp() {
           reduce={reduceMotion}
         />
       )}
-      {auroraTonight && <AuroraGlow reduce={reduceMotion} />}
 
       <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 16px 30vh", position: "relative", zIndex: 1 }}>
 
@@ -1594,11 +1799,15 @@ export default function VaderApp() {
           <h1 style={{
             ...display, fontSize: 30, fontWeight: 700, margin: 0,
             letterSpacing: "0.06em", textTransform: "uppercase",
+            textShadow: T.dark ? "0 1px 20px rgba(0,0,0,0.35)" : "0 1px 14px rgba(255,255,255,0.5)",
           }}>
             Väderlek
           </h1>
-          <p style={{ margin: "3px 0 12px", fontSize: 13, color: T.pageMuted, letterSpacing: "0.01em" }}>
-            Fem prognoskällor. En sanning. Ungefär.
+          <p style={{
+            margin: "3px 0 12px", fontSize: 13, color: T.pageMuted, letterSpacing: "0.01em",
+            textShadow: T.dark ? "0 1px 12px rgba(0,0,0,0.3)" : "0 1px 8px rgba(255,255,255,0.45)",
+          }}>
+            Tre prognoskällor. En sanning. Ungefär.
           </p>
           <button
             onClick={() => setOptimist(!optimist)}
@@ -1726,7 +1935,7 @@ export default function VaderApp() {
 
         {loading ? (
           <div style={{ ...card, textAlign: "center", padding: 48, color: muted }}>
-            Hämtar prognoser från fem källor …
+            Hämtar prognoser från tre källor …
           </div>
         ) : days.length > 0 && (
           <>
@@ -2446,7 +2655,7 @@ export default function VaderApp() {
             )}
 
             <footer style={{ marginTop: 20, fontSize: 11, color: T.pageMuted, textAlign: "center", position: "relative" }}>
-              Data: Open-Meteo (ECMWF · GFS · ICON · MET Norway + ensemble + ERA5-arkiv) · SMHI öppna data · NOAA SWPC.
+              Data: SMHI öppna data · Yr / MET Norway · ECMWF, samt GFS-ensemble och ERA5-arkiv via Open-Meteo · NOAA SWPC.
               Normaler är modellbaserad återanalys, inte stationsmätningar. Ingen prognos är ett löfte.
             </footer>
           </>
