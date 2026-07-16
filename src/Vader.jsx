@@ -1038,7 +1038,7 @@ function CelestialArc({ isDay, sunrise, sunset, nextSunrise, moon, cloud, reduce
               background: `repeating-conic-gradient(from 0deg, ${golden ? "rgba(255,180,90,0.20)" : "rgba(255,225,150,0.18)"} 0deg 4deg, transparent 4deg 13deg)`,
               WebkitMaskImage: "radial-gradient(circle, #000 18%, transparent 62%)",
               maskImage: "radial-gradient(circle, #000 18%, transparent 62%)",
-              animation: "fv-spin 90s linear infinite", opacity: 0.9,
+              animation: "fv-sun-rays 90s linear infinite", opacity: 0.9,
             }} />
           )}
           {/* mjuk halo */}
@@ -1046,7 +1046,7 @@ function CelestialArc({ isDay, sunrise, sunset, nextSunrise, moon, cloud, reduce
             position: "absolute", left: "50%", top: "50%", width: 260, height: 260,
             transform: "translate(-50%,-50%)", borderRadius: "50%",
             background: `radial-gradient(circle, ${sunMid}66 0%, transparent 66%)`,
-            animation: reduce ? "none" : "fv-glow 7s ease-in-out infinite alternate",
+            animation: reduce ? "none" : "fv-sun-halo 7s ease-in-out infinite alternate",
           }} />
           {/* solskiva */}
           <div style={{
@@ -1759,6 +1759,17 @@ export default function VaderApp() {
         }
         @keyframes fv-glow { from { opacity: 0.6; transform: scale(1); } to { opacity: 1; transform: scale(1.08); } }
         @keyframes fv-spin { to { transform: rotate(360deg); } }
+        /* Sol-lagren centreras med translate(-50%,-50%). En animation på transform
+           ersätter hela egenskapen, så centreringen måste upprepas i varje keyframe
+           — annars glider strålar och halo ifrån solskivan. */
+        @keyframes fv-sun-rays {
+          from { transform: translate(-50%,-50%) rotate(0deg); }
+          to { transform: translate(-50%,-50%) rotate(360deg); }
+        }
+        @keyframes fv-sun-halo {
+          from { opacity: 0.6; transform: translate(-50%,-50%) scale(1); }
+          to { opacity: 1; transform: translate(-50%,-50%) scale(1.08); }
+        }
         @keyframes fv-twinkle { 0%,100% { opacity: 0.2; } 50% { opacity: 0.9; } }
         @keyframes fv-drift { from { transform: translateX(0); } to { transform: translateX(160%); } }
         @keyframes fv-flash {
